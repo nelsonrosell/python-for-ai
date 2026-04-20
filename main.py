@@ -1,3 +1,10 @@
-name = 'nelson'
-print(f'Hello, {name}!')
-print('Welcome to Python programming.')
+from app import SqlAgentApp
+
+
+def main() -> None:
+    app = SqlAgentApp()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()
