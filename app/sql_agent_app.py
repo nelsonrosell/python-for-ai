@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import make_url
 
 from .config import AppConfig, load_config
+from .export import export_rows_to_csv
 from .visualization import EarthquakeVisualizer
 
 
@@ -267,6 +268,20 @@ class SqlAgentApp:
         content = getattr(response, "content", "")
         return content if isinstance(content, str) else str(content)
 
+    def _execute_select_query(self, sql_query: str) -> tuple[list[str], list[dict[str, object]]]:
+        normalized = sql_query.strip().lower()
+        if not normalized:
+            raise ValueError("Please provide a SQL SELECT query.")
+        if not normalized.startswith("select"):
+            raise ValueError("Only SELECT queries can be exported.")
+
+        engine = self.db._engine
+        with engine.connect() as connection:
+            result = connection.execute(text(sql_query))
+            columns = list(result.keys())
+            rows = [dict(row._mapping) for row in result]
+        return columns, rows
+
     def ask(self, question: str) -> str:
         if not self._is_database_question(question):
             if self.chat_history and self._is_follow_up_question(question):
@@ -331,10 +346,22 @@ class SqlAgentApp:
             category_label="Country",
         )
 
+    def export_query_to_csv(self, sql_query: str) -> str:
+        """Run a SELECT query and export the result rows to CSV."""
+        try:
+            columns, rows = self._execute_select_query(sql_query)
+            path = export_rows_to_csv(columns, rows, label="export")
+            return f"Exported {len(rows)} row(s) to: {path}"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"Export failed: {e}"
+
     def run(self) -> None:
         print("SQL Agent is ready. Type 'exit' to quit.")
         print("Special commands: 'graph bar' or 'graph pie' to visualize earthquakes by country.\n")
         print("Context commands: 'show context', 'reset context', 'remember N'.\n")
+        print("Export command: export csv SELECT TOP 10 * FROM your_table\n")
 
         while True:
             question = input("Ask a question (database or general): ").strip()
@@ -354,6 +381,11 @@ class SqlAgentApp:
             if normalized == "reset context":
                 self.chat_history.clear()
                 print("\nContext cleared.\n")
+                continue
+
+            if normalized.startswith("export csv "):
+                sql_query = question[len("export csv "):].strip()
+                print(f"\n{self.export_query_to_csv(sql_query)}\n")
                 continue
 
             if normalized.startswith("remember "):
