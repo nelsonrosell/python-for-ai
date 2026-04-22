@@ -1,0 +1,38 @@
+flowchart LR
+    U[User]
+    CLI[Python CLI App]
+
+    subgraph App[Application Layer]
+      PY[Python 3.11]
+      CFG[python-dotenv + env config]
+      LC[LangChain SQL Agent]
+      AOAIClient[langchain-openai AzureChatOpenAI]
+      SQLToolkit[langchain-community SQLDatabase and SQL Agent Toolkit]
+      SA[SQLAlchemy + pyodbc]
+      AID[azure-identity ChainedTokenCredential]
+    end
+
+    subgraph Azure[Azure Services]
+      AOAI[Azure OpenAI Deployment]
+      ENTRA[Microsoft Entra ID Token Service]
+    end
+
+    subgraph Fabric[Microsoft Fabric]
+      FABSQL[Fabric Lakehouse SQL Endpoint / Warehouse SQL Endpoint]
+    end
+
+    U --> CLI
+    CLI --> PY
+    PY --> CFG
+    PY --> LC
+
+    LC --> AOAIClient
+    AOAIClient --> AOAI
+
+    LC --> SQLToolkit
+    SQLToolkit --> SA
+    SA --> FABSQL
+
+    AID --> ENTRA
+    ENTRA --> AID
+    AID --> SA
