@@ -18,11 +18,23 @@ from .config import AppConfig, load_config
 
 SQL_ACCESS_TOKEN_ATTRIBUTE = 1256
 SQL_ACCESS_TOKEN_SCOPE = "https://database.windows.net/.default"
+SQL_AGENT_PREFIX = """
+You are an agent designed to interact with a Microsoft SQL Server-compatible database (Microsoft Fabric SQL endpoint).
+
+When writing SQL:
+- Use SQL Server syntax.
+- Use TOP (n) instead of LIMIT.
+- Prefer explicit column lists over SELECT *.
+- Use square brackets for identifiers only when needed.
+- Never run INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, or EXEC.
+- If a query fails due to syntax, correct it for SQL Server and retry.
+""".strip()
 
 
 class SqlAgentApp:
     def __init__(self, config: AppConfig | None = None) -> None:
         self.config = config or load_config()
+        self.db = self._create_db()
         self.agent = self._create_agent()
 
     def _create_llm(self) -> AzureChatOpenAI:
@@ -110,8 +122,10 @@ class SqlAgentApp:
 
     def _create_db(self) -> SQLDatabase:
         if self.config.sql_use_access_token_auth:
-            odbc_connect = quote_plus(self._build_token_ready_connection_string())
-            engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
+            odbc_connect = quote_plus(
+                self._build_token_ready_connection_string())
+            engine = create_engine(
+                f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
             credential = self._create_token_credential()
 
             @event.listens_for(engine, "do_connect")
@@ -136,11 +150,14 @@ class SqlAgentApp:
 
     def _create_agent(self) -> Any:
         llm = self._create_llm()
-        db = self._create_db()
         return create_sql_agent(
             llm=llm,
-            db=db,
+            db=self.db,
             verbose=True,
+            agent_type="tool-calling",
+            prefix=SQL_AGENT_PREFIX,
+            top_k=10,
+            max_iterations=12,
             agent_executor_kwargs={"handle_parsing_errors": True},
         )
 
