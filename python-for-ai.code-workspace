@@ -5,6 +5,7 @@
     },
   ],
   "settings": {
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
     "chat.agentSkillsLocations": {
       ".github/skills": true,
       ".agents/skills": true,
