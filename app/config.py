@@ -1,10 +1,27 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 
-load_dotenv()
+def _load_env() -> None:
+    """Load .env.<APP_ENV> first, then fall back to .env for any missing values."""
+    env = os.getenv("APP_ENV", "dev").lower()
+    base_dir = Path(__file__).resolve().parent.parent
+    env_file = base_dir / f".env.{env}"
+    fallback = base_dir / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=True)
+    elif fallback.exists():
+        load_dotenv(fallback, override=True)
+    else:
+        raise FileNotFoundError(
+            f"No environment file found. Expected '{env_file}' or '{fallback}'."
+        )
+
+
+_load_env()
 
 
 @dataclass(frozen=True)
@@ -31,7 +48,8 @@ def load_config() -> AppConfig:
     missing = [key for key in REQUIRED_KEYS if not os.getenv(key)]
     if missing:
         missing_keys = ", ".join(missing)
-        raise ValueError(f"Missing required environment variables: {missing_keys}")
+        raise ValueError(
+            f"Missing required environment variables: {missing_keys}")
 
     return AppConfig(
         sql_connection_string=os.environ["SQL_CONNECTION_STRING"],

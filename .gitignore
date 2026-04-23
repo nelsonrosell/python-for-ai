@@ -42,8 +42,12 @@ Thumbs.db
 .coverage
 htmlcov/
 
-# Environment
+# Environment — real files with secrets (never commit these)
 .env
 .env.local
-.env.*
+.env.dev
+.env.test
+.env.prod
+# Allow example/template files
 !.env.example
+!.env.*.example
