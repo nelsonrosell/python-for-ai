@@ -1,4 +1,6 @@
 import os
+import hmac
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -34,7 +36,8 @@ def _check_password() -> bool:
         return True
 
     def _submit() -> None:
-        if st.session_state.get("login_password") == required_password:
+        entered = st.session_state.get("login_password", "")
+        if hmac.compare_digest(entered, required_password):
             st.session_state["authenticated"] = True
         else:
             st.session_state["auth_error"] = True
@@ -111,6 +114,108 @@ def _extract_export_path(message: str) -> str:
     if marker not in message:
         return ""
     return message.split(marker, 1)[-1].strip()
+
+
+def _parse_markdown_table(table_lines: list[str]) -> list[dict[str, str]]:
+    if len(table_lines) < 3:
+        return []
+
+    def _cells(line: str) -> list[str]:
+        # Split only on real table delimiters, not escaped pipes inside values.
+        parts = [part.strip() for part in re.split(r"(?<!\\)\|", line)]
+
+        normalized: list[str] = []
+        for part in parts:
+            if not part:
+                continue
+
+            cell = part.replace(r"\|", "|").strip()
+
+            # If a model returns escaped wrapper pipes in a cell, unwrap them.
+            if cell.startswith("|") and cell.endswith("|") and len(cell) > 1:
+                cell = cell[1:-1].strip()
+
+            if cell:
+                normalized.append(cell)
+
+        return normalized
+
+    headers = _cells(table_lines[0])
+    if not headers:
+        return []
+
+    rows: list[dict[str, str]] = []
+    for row_line in table_lines[2:]:
+        values = _cells(row_line)
+        if not values:
+            continue
+        normalized_values = values + [""] * max(0, len(headers) - len(values))
+        row = {headers[idx]: normalized_values[idx]
+               for idx in range(len(headers))}
+        rows.append(row)
+    return rows
+
+
+def _split_markdown_content(text: str) -> list[tuple[str, str | list[dict[str, str]]]]:
+    """Split content into text and table segments; supports multiple tables."""
+    lines = text.splitlines()
+    segments: list[tuple[str, str | list[dict[str, str]]]] = []
+    text_buffer: list[str] = []
+    i = 0
+
+    while i < len(lines):
+        current = lines[i].strip()
+        next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+
+        is_table_header = current.startswith("|") and next_line.startswith(
+            "|") and re.search(r"-", next_line)
+        if not is_table_header:
+            text_buffer.append(lines[i])
+            i += 1
+            continue
+
+        if text_buffer:
+            text_segment = "\n".join(text_buffer).strip()
+            if text_segment:
+                segments.append(("text", text_segment))
+            text_buffer = []
+
+        table_lines: list[str] = [lines[i].strip(), lines[i + 1].strip()]
+        i += 2
+        while i < len(lines):
+            row_line = lines[i].strip()
+            if row_line.startswith("|"):
+                table_lines.append(row_line)
+                i += 1
+                continue
+            if not row_line:
+                i += 1
+                continue
+            break
+
+        rows = _parse_markdown_table(table_lines)
+        if rows:
+            segments.append(("table", rows))
+        else:
+            segments.append(("text", "\n".join(table_lines)))
+
+    if text_buffer:
+        text_segment = "\n".join(text_buffer).strip()
+        if text_segment:
+            segments.append(("text", text_segment))
+
+    if not segments:
+        return [("text", text)]
+    return segments
+
+
+def _render_message_content(content: str) -> None:
+    segments = _split_markdown_content(content)
+    for kind, payload in segments:
+        if kind == "table":
+            st.table(payload)
+        else:
+            st.markdown(payload)
 
 
 def main() -> None:
@@ -205,7 +310,7 @@ def main() -> None:
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            _render_message_content(message["content"])
             image_path = message.get("image_path", "")
             if image_path and Path(image_path).exists():
                 st.image(image_path, use_column_width=True)
@@ -217,19 +322,19 @@ def main() -> None:
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
-        st.markdown(prompt)
+        _render_message_content(prompt)
 
     with st.chat_message("assistant"):
         try:
             response_message = run_chat_turn(app, prompt)
-            st.markdown(response_message["content"])
+            _render_message_content(response_message["content"])
             image_path = response_message.get("image_path", "")
             if image_path and Path(image_path).exists():
                 st.image(image_path, use_column_width=True)
             st.session_state.messages.append(response_message)
         except Exception as e:
             error_text = f"Error: {e}"
-            st.markdown(error_text)
+            _render_message_content(error_text)
             st.session_state.messages.append(
                 {"role": "assistant", "content": error_text}
             )

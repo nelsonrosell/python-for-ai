@@ -1,0 +1,62 @@
+graph TB
+    User[👤 User Layer]
+    
+    CLI["📟 CLI Interface"]
+    Web["🌐 Streamlit Web App"]
+    
+    User -->|Input Query| CLI
+    User -->|Input Query| Web
+    
+    subgraph AppLayer["🔧 Application Layer"]
+        Config["Config Manager<br/>python-dotenv"]
+        Agent["LangChain SQL Agent<br/>Query Orchestrator"]
+        Export["Export Module<br/>CSV Export"]
+        Viz["Visualization Module<br/>matplotlib/plotly"]
+    end
+    
+    CLI -->|Execute| Agent
+    Web -->|Execute| Agent
+    
+    Agent -->|Read Config| Config
+    Agent -->|Export Data| Export
+    Agent -->|Visualize| Viz
+    
+    subgraph AzureLayer["☁️ Azure Services Layer"]
+        LLM["Azure OpenAI<br/>LLM API"]
+        Auth["Azure Identity<br/>Token Service"]
+        EntraID["Microsoft Entra ID<br/>Identity Provider"]
+    end
+    
+    Agent -->|LLM Request| LLM
+    Agent -->|Get Token| Auth
+    Auth -->|Authenticate| EntraID
+    
+    subgraph DataLayer["💾 Data Layer"]
+        SQLAlchemy["SQLAlchemy<br/>ORM Engine"]
+        PyODBC["pyodbc<br/>Driver"]
+        FabricDB["Microsoft Fabric SQL<br/>Data Warehouse"]
+    end
+    
+    Agent -->|Generate SQL| SQLAlchemy
+    SQLAlchemy -->|Execute Query| PyODBC
+    PyODBC -->|Connect & Query| FabricDB
+    
+    FabricDB -->|Results| PyODBC
+    PyODBC -->|Data| SQLAlchemy
+    SQLAlchemy -->|Rows| Agent
+    
+    LLM -->|Response| Agent
+    Auth -->|Token| PyODBC
+    
+    Agent -->|Results| Export
+    Agent -->|Results| Viz
+    Export -->|CSV File| User
+    Viz -->|Chart| User
+    
+    style User fill:#e1f5ff
+    style AppLayer fill:#fff3e0
+    style AzureLayer fill:#f3e5f5
+    style DataLayer fill:#e8f5e9
+    style Agent fill:#ffe0b2
+    style LLM fill:#e1bee7
+    style FabricDB fill:#c8e6c9

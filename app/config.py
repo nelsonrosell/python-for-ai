@@ -6,16 +6,24 @@ from dotenv import load_dotenv
 
 
 def _load_env() -> None:
-    """Load .env.<APP_ENV> first, then fall back to .env for any missing values."""
+    """Load defaults from .env, then override with .env.<APP_ENV> if present."""
     env = os.getenv("APP_ENV", "dev").lower()
     base_dir = Path(__file__).resolve().parent.parent
     env_file = base_dir / f".env.{env}"
     fallback = base_dir / ".env"
+    loaded_any = False
+
+    if fallback.exists():
+        # Base defaults.
+        load_dotenv(fallback, override=False)
+        loaded_any = True
+
     if env_file.exists():
+        # Environment-specific values override defaults.
         load_dotenv(env_file, override=True)
-    elif fallback.exists():
-        load_dotenv(fallback, override=True)
-    else:
+        loaded_any = True
+
+    if not loaded_any:
         raise FileNotFoundError(
             f"No environment file found. Expected '{env_file}' or '{fallback}'."
         )
