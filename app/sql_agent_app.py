@@ -69,13 +69,15 @@ class SqlAgentApp:
             credentials.append(
                 InteractiveBrowserCredential(
                     login_hint=self.config.sql_entra_login_hint,
+                    response_mode="form_post",
                 )
             )
 
         credentials.append(AzureCliCredential())
 
         if not self.config.sql_entra_login_hint:
-            credentials.append(InteractiveBrowserCredential())
+            credentials.append(InteractiveBrowserCredential(
+                response_mode="form_post"))
 
         return ChainedTokenCredential(*credentials)
 
