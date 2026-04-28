@@ -1,5 +1,6 @@
 import struct
 import re
+import warnings
 from urllib.parse import quote_plus
 from typing import Any
 
@@ -22,6 +23,12 @@ from .visualization import EarthquakeVisualizer
 SQL_ACCESS_TOKEN_ATTRIBUTE = 1256
 SQL_ACCESS_TOKEN_SCOPE = "https://database.windows.net/.default"
 DEFAULT_MAX_EXPORT_ROWS = 500
+warnings.filterwarnings(
+    "ignore",
+    message=r"response_mode='form_post' is recommended for better security\..*",
+    category=UserWarning,
+    module=r"msal\.oauth2cli\.oauth2",
+)
 _TABLE_REFERENCE_PATTERN = re.compile(
     r'\b(?:FROM|JOIN)\s+([A-Za-z0-9_\.\[\]"]+)', re.IGNORECASE
 )
@@ -96,14 +103,13 @@ class SqlAgentApp:
             credentials.append(
                 InteractiveBrowserCredential(
                     login_hint=self.config.sql_entra_login_hint,
-                    response_mode="form_post",
                 )
             )
 
         credentials.append(AzureCliCredential())
 
         if not self.config.sql_entra_login_hint:
-            credentials.append(InteractiveBrowserCredential(response_mode="form_post"))
+            credentials.append(InteractiveBrowserCredential())
 
         return ChainedTokenCredential(*credentials)
 
@@ -820,7 +826,12 @@ class SqlAgentApp:
         print("Export command: export csv SELECT TOP 10 * FROM your_table\n")
 
         while True:
-            question = input("Ask a question (database or general): ").strip()
+            try:
+                question = input("Ask a question (database or general): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                break
+
             if question.lower() == "exit":
                 print("Goodbye!")
                 break

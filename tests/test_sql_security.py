@@ -99,10 +99,25 @@ class TestSqlSecurity(unittest.TestCase):
 
         interactive_browser_credential.assert_called_once_with(
             login_hint="user@example.com",
-            response_mode="form_post",
         )
         azure_cli_credential.assert_called_once_with()
         chained_token_credential.assert_called_once_with("interactive", "cli")
+
+    @patch("builtins.print")
+    @patch("builtins.input", side_effect=KeyboardInterrupt)
+    def test_run_handles_keyboard_interrupt_cleanly(
+        self,
+        mocked_input,
+        mocked_print,
+    ) -> None:
+        app = object.__new__(SqlAgentApp)
+        app.chat_history = []
+        app.max_history_turns = 8
+
+        app.run()
+
+        mocked_input.assert_called_once_with("Ask a question (database or general): ")
+        mocked_print.assert_any_call("\nGoodbye!")
 
 
 if __name__ == "__main__":
