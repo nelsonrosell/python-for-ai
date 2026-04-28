@@ -1,5 +1,6 @@
 import struct
 import re
+import warnings
 from urllib.parse import quote_plus
 from typing import Any
 
@@ -21,6 +22,17 @@ from .visualization import EarthquakeVisualizer
 
 SQL_ACCESS_TOKEN_ATTRIBUTE = 1256
 SQL_ACCESS_TOKEN_SCOPE = "https://database.windows.net/.default"
+DEFAULT_MAX_EXPORT_ROWS = 500
+warnings.filterwarnings(
+    "ignore",
+    message=r"response_mode='form_post' is recommended for better security\..*",
+    category=UserWarning,
+    module=r"msal\.oauth2cli\.oauth2",
+)
+_TABLE_REFERENCE_PATTERN = re.compile(
+    r'\b(?:FROM|JOIN)\s+([A-Za-z0-9_\.\[\]"]+)', re.IGNORECASE
+)
+_CTE_PATTERN = re.compile(r"\bWITH\s+([A-Za-z0-9_]+)\s+AS\b", re.IGNORECASE)
 SQL_AGENT_PREFIX = """
 You are an agent designed to interact with a Microsoft SQL Server-compatible database (Microsoft Fabric SQL endpoint).
 
@@ -80,6 +92,10 @@ class SqlAgentApp:
         1. InteractiveBrowserCredential with a login hint (if configured).
         2. AzureCliCredential (works when the developer is already logged in via 'az login').
         3. InteractiveBrowserCredential without a hint (fallback pop-up).
+
+        When a login hint is configured, prefer the interactive credential first
+        so the app authenticates with that intended Entra user instead of any
+        unrelated Azure CLI session already present on the machine.
         """
         credentials = []
 
@@ -87,15 +103,13 @@ class SqlAgentApp:
             credentials.append(
                 InteractiveBrowserCredential(
                     login_hint=self.config.sql_entra_login_hint,
-                    response_mode="form_post",
                 )
             )
 
         credentials.append(AzureCliCredential())
 
         if not self.config.sql_entra_login_hint:
-            credentials.append(InteractiveBrowserCredential(
-                response_mode="form_post"))
+            credentials.append(InteractiveBrowserCredential())
 
         return ChainedTokenCredential(*credentials)
 
@@ -171,11 +185,11 @@ class SqlAgentApp:
         2. SQLAlchemy URI: passed directly to SQLDatabase.from_uri().
         3. Raw ODBC string: URL-encoded and wrapped in an mssql+pyodbc engine.
         """
+        include_tables = list(self.config.sql_allowed_tables) or None
+
         if self.config.sql_use_access_token_auth:
-            odbc_connect = quote_plus(
-                self._build_token_ready_connection_string())
-            engine = create_engine(
-                f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
+            odbc_connect = quote_plus(self._build_token_ready_connection_string())
+            engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
             credential = self._create_token_credential()
 
             @event.listens_for(engine, "do_connect")
@@ -189,27 +203,118 @@ class SqlAgentApp:
                 )
                 cparams["attrs_before"] = attrs_before
 
-            return SQLDatabase(engine)
+            return SQLDatabase(engine, include_tables=include_tables)
 
         if self._is_sqlalchemy_uri(self.config.sql_connection_string):
-            return SQLDatabase.from_uri(self.config.sql_connection_string)
+            return SQLDatabase.from_uri(
+                self.config.sql_connection_string,
+                include_tables=include_tables,
+            )
 
         odbc_connect = quote_plus(self.config.sql_connection_string)
         engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
-        return SQLDatabase(engine)
+        return SQLDatabase(engine, include_tables=include_tables)
 
     _BLOCKED_SQL_COMMANDS = re.compile(
         r"\b(DELETE|UPDATE|INSERT|MERGE|DROP|ALTER|CREATE|TRUNCATE|EXEC(UTE)?)\b",
+        re.IGNORECASE,
+    )
+    _SELECT_INTO_PATTERN = re.compile(r"\bSELECT\b[\s\S]*\bINTO\b", re.IGNORECASE)
+    _EXPORT_TOP_PATTERN = re.compile(
+        r"^\s*SELECT\s+(?:DISTINCT\s+)?TOP\s*(?:\(\s*(\d+)\s*\)|(\d+))\b",
         re.IGNORECASE,
     )
 
     @classmethod
     def _validate_sql(cls, query: str) -> str | None:
         """Return an error string if the query contains a blocked command, else None."""
+        normalized = query.strip()
+        if not normalized:
+            return "Blocked: empty SQL statements are not permitted."
+
+        if any(token in normalized for token in ("--", "/*", "*/")):
+            return "Blocked: SQL comments are not permitted."
+
+        if ";" in normalized.rstrip().rstrip(";"):
+            return "Blocked: multiple SQL statements are not permitted."
+
         match = cls._BLOCKED_SQL_COMMANDS.search(query)
         if match:
             return f"Blocked: '{match.group().upper()}' statements are not permitted."
+
+        if cls._SELECT_INTO_PATTERN.search(query):
+            return "Blocked: 'SELECT INTO' statements are not permitted."
+
         return None
+
+    def _get_max_export_rows(self) -> int:
+        return getattr(self.config, "max_export_rows", DEFAULT_MAX_EXPORT_ROWS)
+
+    @staticmethod
+    def _normalize_table_identifier(identifier: str) -> str:
+        cleaned = identifier.strip().strip(",")
+        parts = [part.strip('[]"') for part in cleaned.split(".") if part.strip()]
+        if not parts:
+            return ""
+        return parts[-1].lower()
+
+    def _validate_allowed_tables(self, sql_query: str) -> str | None:
+        if not self.config.sql_allowed_tables:
+            return None
+
+        allowed_tables = {
+            self._normalize_table_identifier(table)
+            for table in self.config.sql_allowed_tables
+        }
+        cte_names = {
+            self._normalize_table_identifier(match.group(1))
+            for match in _CTE_PATTERN.finditer(sql_query)
+        }
+
+        referenced_tables = {
+            self._normalize_table_identifier(match.group(1))
+            for match in _TABLE_REFERENCE_PATTERN.finditer(sql_query)
+        }
+        referenced_tables = {table for table in referenced_tables if table}
+        disallowed_tables = sorted(
+            table
+            for table in referenced_tables
+            if table not in allowed_tables and table not in cte_names
+        )
+        if disallowed_tables:
+            formatted = ", ".join(disallowed_tables)
+            return f"Blocked: query references non-allowlisted tables: {formatted}."
+        return None
+
+    def _validate_query(self, sql_query: str) -> str | None:
+        error = self._validate_sql(sql_query)
+        if error:
+            return error
+        return self._validate_allowed_tables(sql_query)
+
+    def _build_agent_prefix(self) -> str:
+        prefix = SQL_AGENT_PREFIX
+        if self.config.sql_allowed_tables:
+            allowed = ", ".join(self.config.sql_allowed_tables)
+            prefix += (
+                "\n\nAllowed tables/views: "
+                f"{allowed}. Never query tables outside this allowlist."
+            )
+        return prefix
+
+    def _validate_export_query(self, sql_query: str) -> None:
+        top_match = self._EXPORT_TOP_PATTERN.match(sql_query)
+        max_export_rows = self._get_max_export_rows()
+        if not top_match:
+            raise ValueError(
+                f"Export queries must begin with SELECT TOP (n), where n <= {max_export_rows}."
+            )
+
+        row_limit = int(top_match.group(1) or top_match.group(2))
+        if row_limit > max_export_rows:
+            raise ValueError(
+                f"Export queries are limited to TOP ({max_export_rows}) rows."
+            )
 
     def _patch_db_with_guard(self) -> None:
         """Patch self.db.run() so the keyword guard applies to every execution path,
@@ -217,7 +322,8 @@ class SqlAgentApp:
         original_run = self.db.run
 
         def guarded_run(command: str, *args: Any, **kwargs: Any) -> str:
-            error = self._validate_sql(command)
+            query_text = command if isinstance(command, str) else str(command)
+            error = self._validate_query(query_text)
             if error:
                 return error
             return original_run(command, *args, **kwargs)
@@ -230,9 +336,9 @@ class SqlAgentApp:
         return create_sql_agent(
             llm=llm,
             db=self.db,
-            verbose=True,
+            verbose=self.config.agent_verbose_logging,
             agent_type="tool-calling",
-            prefix=SQL_AGENT_PREFIX,
+            prefix=self._build_agent_prefix(),
             top_k=3,
             max_iterations=5,
             agent_executor_kwargs={"handle_parsing_errors": True},
@@ -384,7 +490,11 @@ class SqlAgentApp:
         for i in range(len(lines) - 1):
             header = lines[i]
             separator = lines[i + 1]
-            if header.startswith("|") and separator.startswith("|") and "-" in separator:
+            if (
+                header.startswith("|")
+                and separator.startswith("|")
+                and "-" in separator
+            ):
                 return True
         return False
 
@@ -497,7 +607,7 @@ class SqlAgentApp:
         )
         # Keep only recent turns to avoid unbounded context growth.
         if len(self.chat_history) > self.max_history_turns:
-            self.chat_history = self.chat_history[-self.max_history_turns:]
+            self.chat_history = self.chat_history[-self.max_history_turns :]
 
     def _format_context_history(self) -> str:
         """Return a human-readable summary of the current chat history,
@@ -566,7 +676,9 @@ class SqlAgentApp:
         content = getattr(response, "content", "")
         return content if isinstance(content, str) else str(content)
 
-    def _execute_select_query(self, sql_query: str) -> tuple[list[str], list[dict[str, object]]]:
+    def _execute_select_query(
+        self, sql_query: str
+    ) -> tuple[list[str], list[dict[str, object]]]:
         """Execute a raw SELECT query directly against the database engine and
         return (column_names, rows). Raises ValueError if the query is empty,
         does not start with SELECT, or contains a blocked SQL command.
@@ -581,6 +693,10 @@ class SqlAgentApp:
         error = self._validate_sql(sql_query)
         if error:
             raise ValueError(error)
+        allowed_tables_error = self._validate_allowed_tables(sql_query)
+        if allowed_tables_error:
+            raise ValueError(allowed_tables_error)
+        self._validate_export_query(sql_query)
 
         engine = self.db._engine
         with engine.connect() as connection:
@@ -605,16 +721,14 @@ class SqlAgentApp:
                     answer = converted
                 else:
                     answer = self._ask_general(
-                        self._build_table_format_prompt(
-                            question, last_db_answer)
+                        self._build_table_format_prompt(question, last_db_answer)
                     )
                 self._remember_interaction("general", question, answer)
                 return answer
 
         if not self._is_database_question(question):
             if self.chat_history and self._is_follow_up_question(question):
-                answer = self._ask_general(
-                    self._build_follow_up_prompt(question))
+                answer = self._ask_general(self._build_follow_up_prompt(question))
             else:
                 answer = self._ask_general(question)
             self._remember_interaction("general", question, answer)
@@ -624,8 +738,7 @@ class SqlAgentApp:
             # For database follow-up questions, include conversation context
             question_to_ask = question
             if self.chat_history and self._is_follow_up_question(question):
-                question_to_ask = self._build_database_follow_up_prompt(
-                    question)
+                question_to_ask = self._build_database_follow_up_prompt(question)
 
             result = self.agent.invoke(question_to_ask)
             answer = result["output"]
@@ -706,12 +819,19 @@ class SqlAgentApp:
         All other input is forwarded to ask().
         """
         print("SQL Agent is ready. Type 'exit' to quit.")
-        print("Special commands: 'graph bar' or 'graph pie' to visualize earthquakes by country.\n")
+        print(
+            "Special commands: 'graph bar' or 'graph pie' to visualize earthquakes by country.\n"
+        )
         print("Context commands: 'show context', 'reset context', 'remember N'.\n")
         print("Export command: export csv SELECT TOP 10 * FROM your_table\n")
 
         while True:
-            question = input("Ask a question (database or general): ").strip()
+            try:
+                question = input("Ask a question (database or general): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                break
+
             if question.lower() == "exit":
                 print("Goodbye!")
                 break
@@ -731,7 +851,7 @@ class SqlAgentApp:
                 continue
 
             if normalized.startswith("export csv "):
-                sql_query = question[len("export csv "):].strip()
+                sql_query = question[len("export csv ") :].strip()
                 print(f"\n{self.export_query_to_csv(sql_query)}\n")
                 continue
 
@@ -740,11 +860,12 @@ class SqlAgentApp:
                     max_turns = int(normalized.split()[1])
                     if max_turns <= 0:
                         print(
-                            "\nPlease provide a positive number, for example: remember 8\n")
+                            "\nPlease provide a positive number, for example: remember 8\n"
+                        )
                         continue
                     self.max_history_turns = max_turns
                     if len(self.chat_history) > self.max_history_turns:
-                        self.chat_history = self.chat_history[-self.max_history_turns:]
+                        self.chat_history = self.chat_history[-self.max_history_turns :]
                     print(
                         f"\nContext memory size set to {self.max_history_turns} turns.\n"
                     )
@@ -756,9 +877,7 @@ class SqlAgentApp:
             # Example: "Generate a pie chart of earthquake counts by country"
             is_chart_request = any(
                 token in normalized for token in ["graph", "chart", "plot", "visualize"]
-            ) and any(
-                token in normalized for token in ["earthquake", "earthquakes"]
-            )
+            ) and any(token in normalized for token in ["earthquake", "earthquakes"])
 
             if normalized.startswith("graph") or is_chart_request:
                 try:
@@ -773,9 +892,7 @@ class SqlAgentApp:
                     else:
                         # Default to bar chart for generic chart requests.
                         path = self.generate_earthquake_bar_chart()
-                        print(
-                            f"\nGenerated bar chart (default) saved to: {path}\n"
-                        )
+                        print(f"\nGenerated bar chart (default) saved to: {path}\n")
                 except Exception as e:
                     print(f"Error generating graph: {e}\n")
                 continue
