@@ -2,6 +2,7 @@ import os
 import hmac
 import re
 from pathlib import Path
+from typing import Mapping
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -26,19 +27,69 @@ def _load_env() -> None:
         _ENV_LOADED = True
 
 
+def _get_header_value(headers: Mapping[str, str], name: str) -> str:
+    for key, value in headers.items():
+        if key.lower() == name.lower():
+            return value
+    return ""
+
+
+def _check_trusted_header_auth(headers: Mapping[str, str]) -> tuple[bool, str]:
+    trusted_header = os.environ.get("APP_TRUSTED_AUTH_HEADER", "").strip()
+    if not trusted_header:
+        return False, ""
+
+    header_value = _get_header_value(headers, trusted_header)
+    if not header_value:
+        return False, ""
+
+    expected_value = os.environ.get("APP_TRUSTED_AUTH_VALUE", "").strip()
+    if expected_value and header_value != expected_value:
+        return False, ""
+
+    user_header = os.environ.get("APP_TRUSTED_USER_HEADER", "").strip()
+    if user_header:
+        principal = _get_header_value(headers, user_header)
+    elif expected_value:
+        principal = trusted_header
+    else:
+        principal = header_value
+
+    return True, principal or header_value
+
+
 def _check_password() -> bool:
     """Return True if the user has supplied the correct password (or if no
     password is configured, skip the gate entirely)."""
     _load_env()
+    app_env = os.environ.get("APP_ENV", "dev").lower()
+    trusted_auth, principal = _check_trusted_header_auth(dict(st.context.headers))
+    if trusted_auth:
+        st.session_state["authenticated"] = True
+        st.session_state["auth_provider"] = "trusted-header"
+        st.session_state["auth_principal"] = principal
+        return True
+
     required_password = os.environ.get("APP_PASSWORD", "")
     if not required_password:
-        # No password configured → open access
-        return True
+        if app_env == "dev":
+            return True
+
+        st.set_page_config(
+            page_title="Earthquake Agent – Configuration Error", page_icon="🔒"
+        )
+        st.title("🔒 Password required")
+        st.error(
+            "Configure APP_PASSWORD or a trusted auth header when APP_ENV is not 'dev'."
+        )
+        st.stop()
+        return False
 
     def _submit() -> None:
         entered = st.session_state.get("login_password", "")
         if hmac.compare_digest(entered, required_password):
             st.session_state["authenticated"] = True
+            st.session_state["auth_provider"] = "password"
         else:
             st.session_state["auth_error"] = True
 
@@ -83,7 +134,7 @@ def run_chat_turn(app: SqlAgentApp, question: str) -> dict[str, str]:
     normalized = question.lower()
 
     if normalized.startswith("export csv "):
-        sql_query = question[len("export csv "):].strip()
+        sql_query = question[len("export csv ") :].strip()
         return {
             "role": "assistant",
             "content": app.export_query_to_csv(sql_query),
@@ -150,8 +201,7 @@ def _parse_markdown_table(table_lines: list[str]) -> list[dict[str, str]]:
         if not values:
             continue
         normalized_values = values + [""] * max(0, len(headers) - len(values))
-        row = {headers[idx]: normalized_values[idx]
-               for idx in range(len(headers))}
+        row = {headers[idx]: normalized_values[idx] for idx in range(len(headers))}
         rows.append(row)
     return rows
 
@@ -167,8 +217,11 @@ def _split_markdown_content(text: str) -> list[tuple[str, str | list[dict[str, s
         current = lines[i].strip()
         next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
 
-        is_table_header = current.startswith("|") and next_line.startswith(
-            "|") and re.search(r"-", next_line)
+        is_table_header = (
+            current.startswith("|")
+            and next_line.startswith("|")
+            and re.search(r"-", next_line)
+        )
         if not is_table_header:
             text_buffer.append(lines[i])
             i += 1
@@ -221,11 +274,11 @@ def _render_message_content(content: str) -> None:
 def main() -> None:
     _check_password()  # blocks and stops if unauthenticated
 
-    st.set_page_config(page_title="Earthquake Agent",
-                       page_icon="🌍", layout="wide")
+    st.set_page_config(page_title="Earthquake Agent", page_icon="🌍", layout="wide")
     st.title("Earthquake Data Agent")
     st.caption(
-        "Ask database questions, general questions, request earthquake charts, or run 'export csv SELECT ...'.")
+        "Ask database questions, general questions, request earthquake charts, or run 'export csv SELECT ...'."
+    )
 
     app = get_app()
 
@@ -234,6 +287,12 @@ def main() -> None:
 
     with st.sidebar:
         st.subheader("Quick Actions")
+        auth_provider = st.session_state.get("auth_provider", "dev")
+        auth_principal = st.session_state.get("auth_principal", "")
+        if auth_principal:
+            st.caption(f"Authenticated via {auth_provider}: {auth_principal}")
+        elif auth_provider != "dev":
+            st.caption(f"Authenticated via {auth_provider}")
 
         if st.button("Generate Bar Chart by Country", use_container_width=True):
             chart_path = app.generate_earthquake_bar_chart()
@@ -282,14 +341,12 @@ def main() -> None:
             value="SELECT TOP 10 * FROM earthquake_events_gold",
             height=140,
             key="export_sql_query",
-            help="Only SELECT queries are allowed.",
+            help=f"Only single-statement SELECT TOP (n) queries are allowed. Maximum export size: TOP ({app.config.max_export_rows}).",
         )
 
         if st.button("Export Query to CSV", use_container_width=True):
             result = app.export_query_to_csv(export_query.strip())
-            st.session_state.messages.append(
-                {"role": "assistant", "content": result}
-            )
+            st.session_state.messages.append({"role": "assistant", "content": result})
             export_path = _extract_export_path(result)
             if export_path:
                 st.session_state["last_export_path"] = export_path
@@ -306,7 +363,8 @@ def main() -> None:
                 )
 
         st.caption(
-            "You can also type: export csv SELECT TOP 10 * FROM earthquake_events_gold")
+            f"You can also type: export csv SELECT TOP 10 * FROM earthquake_events_gold. Maximum export size: TOP ({app.config.max_export_rows})."
+        )
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
