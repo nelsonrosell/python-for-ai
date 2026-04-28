@@ -19,6 +19,9 @@ CHATGPT_STYLE = """
         --text: var(--text-color);
         --text-muted: color-mix(in srgb, var(--text-color) 62%, transparent);
         --accent: var(--primary-color);
+        --content-width: 700px;
+        --prompt-width: 580px;
+        --content-inset: 1.35rem;
     }
 
     [data-testid="stSidebar"] {
@@ -44,6 +47,27 @@ CHATGPT_STYLE = """
         border-radius: 0.85rem;
     }
 
+    [data-testid="stTextInputRootElement"] {
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+        box-shadow: none;
+        background: var(--surface);
+    }
+
+    [data-testid="stTextInputRootElement"]:focus-within {
+        border-color: var(--border);
+        box-shadow: none;
+    }
+
+    [data-testid="stTextInputRootElement"] input {
+        box-shadow: none;
+    }
+
+    [data-testid="stTextInputRootElement"]:has(input[aria-invalid="true"]) {
+        border-color: var(--border);
+        box-shadow: none;
+    }
+
     .stButton > button {
         border-radius: 999px;
         border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
@@ -64,10 +88,20 @@ CHATGPT_STYLE = """
 
     .chat-shell {
         margin: 0 auto 1.4rem auto;
+        max-width: var(--content-width);
         padding: 1.2rem 1.35rem;
         border: 1px solid var(--border);
         border-radius: 1.2rem;
         backdrop-filter: blur(18px);
+    }
+
+    .centered-prompt-shell {
+        max-width: var(--content-width);
+        margin: 0 auto 1.25rem auto;
+        transform: translateX(50px);
+        padding-left: var(--content-inset);
+        padding-right: var(--content-inset);
+        box-sizing: border-box;
     }
 
     .chat-shell h1 {
@@ -130,8 +164,8 @@ CHATGPT_STYLE = """
 
     [aria-label="Chat message from user"] {
         border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-        margin-left: auto;
-        margin-right: 0;
+        margin-left: 0;
+        margin-right: auto;
         max-width: 72%;
     }
 
@@ -145,6 +179,7 @@ CHATGPT_STYLE = """
     [aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] li,
     [aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] span {
         color: var(--text);
+        text-align: left;
     }
 
     [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p,
@@ -208,13 +243,45 @@ CHATGPT_STYLE = """
     }
 
     [data-testid="stChatInput"] {
-        max-width: 980px;
-        padding-left: 1.8rem;
-        padding-right: 1.8rem;
+        max-width: var(--content-width);
+        padding-left: var(--content-inset);
+        padding-right: var(--content-inset);
         margin-left: auto;
         margin-right: auto;
         width: 100%;
         box-sizing: border-box;
+    }
+
+    [data-testid="stChatInput"] > div {
+        width: min(100%, var(--prompt-width));
+        max-width: var(--prompt-width);
+        margin-right: auto;
+    }
+
+    [data-testid="stChatInput"] [data-baseweb="textarea"] {
+        border-color: transparent;
+        box-shadow: none;
+        background: var(--surface);
+        justify-content: flex-start;
+        text-align: left;
+        width: 100%;
+    }
+
+    [data-testid="stChatInput"] [data-baseweb="textarea"]:focus-within {
+        border-color: transparent;
+        box-shadow: none;
+    }
+
+    [data-testid="stChatInput"] textarea {
+        box-shadow: none;
+        outline: none;
+        text-align: left;
+        padding-left: 0.75rem;
+    }
+
+    [data-testid="stChatInput"] [data-baseweb="textarea"]:has(textarea[aria-invalid="true"]) {
+        border-color: transparent;
+        box-shadow: none;
     }
 
     .block-container {
@@ -294,7 +361,8 @@ def _check_password() -> bool:
     password is configured, skip the gate entirely)."""
     _load_env()
     app_env = os.environ.get("APP_ENV", "dev").lower()
-    trusted_auth, principal = _check_trusted_header_auth(dict(st.context.headers))
+    trusted_auth, principal = _check_trusted_header_auth(
+        dict(st.context.headers))
     if trusted_auth:
         st.session_state["authenticated"] = True
         st.session_state["auth_provider"] = "trusted-header"
@@ -365,7 +433,7 @@ def run_chat_turn(app: SqlAgentApp, question: str) -> dict[str, str]:
     normalized = question.lower()
 
     if normalized.startswith("export csv "):
-        sql_query = question[len("export csv ") :].strip()
+        sql_query = question[len("export csv "):].strip()
         return {
             "role": "assistant",
             "content": app.export_query_to_csv(sql_query),
@@ -398,7 +466,39 @@ def _submit_prompt(app: SqlAgentApp, prompt: str) -> None:
         st.session_state.messages.append(response_message)
     except Exception as e:
         error_text = f"Error: {e}"
-        st.session_state.messages.append({"role": "assistant", "content": error_text})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": error_text})
+
+
+def _queue_prompt(prompt: str) -> None:
+    st.session_state.pending_prompt = prompt
+    st.session_state.awaiting_response = True
+
+
+def _render_waiting_indicator() -> None:
+    st.markdown(
+        """
+        <div class="assistant-loading">
+            <span class="dot"></span>
+            <span>Searching for an answer...</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _process_pending_prompt(app: SqlAgentApp) -> None:
+    prompt = st.session_state.get("pending_prompt", "").strip()
+    if not prompt:
+        st.session_state.awaiting_response = False
+        return
+
+    with st.spinner("Searching for an answer..."):
+        _submit_prompt(app, prompt)
+
+    st.session_state.pending_prompt = ""
+    st.session_state.awaiting_response = False
+    st.rerun()
 
 
 def _extract_export_path(message: str) -> str:
@@ -442,7 +542,8 @@ def _parse_markdown_table(table_lines: list[str]) -> list[dict[str, str]]:
         if not values:
             continue
         normalized_values = values + [""] * max(0, len(headers) - len(values))
-        row = {headers[idx]: normalized_values[idx] for idx in range(len(headers))}
+        row = {headers[idx]: normalized_values[idx]
+               for idx in range(len(headers))}
         rows.append(row)
     return rows
 
@@ -562,20 +663,25 @@ def _render_starter_prompts(app: SqlAgentApp) -> None:
 
 
 def _render_centered_prompt_form() -> str | None:
-    with st.form("center_prompt_form", clear_on_submit=True, border=False):
-        prompt_col, button_col = st.columns([10.5, 1.1])
-        with prompt_col:
-            prompt = st.text_input(
-                "Ask me about your data or even general questions",
-                placeholder="Ask me about your data or even general questions",
-                key="center_prompt_text",
-                label_visibility="collapsed",
-            )
-        with button_col:
-            submitted = st.form_submit_button(
-                "Send",
-                use_container_width=True,
-            )
+    outer_left, prompt_area, outer_right = st.columns([1.3, 6.7, 1])
+    with prompt_area:
+        st.markdown('<div class="centered-prompt-shell">',
+                    unsafe_allow_html=True)
+        with st.form("center_prompt_form", clear_on_submit=True, border=False):
+            prompt_col, button_col = st.columns([8.6, 1.4])
+            with prompt_col:
+                prompt = st.text_input(
+                    "Ask me about your data or even general questions",
+                    placeholder="Ask me about your data or even general questions",
+                    key="center_prompt_text",
+                    label_visibility="collapsed",
+                )
+            with button_col:
+                submitted = st.form_submit_button(
+                    "Send",
+                    use_container_width=True,
+                )
+        st.markdown("</div>", unsafe_allow_html=True)
 
     if submitted and prompt.strip():
         return prompt.strip()
@@ -606,7 +712,8 @@ def _render_export_expander(app: SqlAgentApp) -> None:
             "Export Query to CSV", key="main_export_button", use_container_width=True
         ):
             result = app.export_query_to_csv(export_query.strip())
-            st.session_state.messages.append({"role": "assistant", "content": result})
+            st.session_state.messages.append(
+                {"role": "assistant", "content": result})
             export_path = _extract_export_path(result)
             if export_path:
                 st.session_state["last_export_path"] = export_path
@@ -645,6 +752,30 @@ def main() -> None:
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "pending_prompt" not in st.session_state:
+        st.session_state.pending_prompt = ""
+    if "awaiting_response" not in st.session_state:
+        st.session_state.awaiting_response = False
+
+    has_messages = bool(st.session_state.messages)
+    has_pending_prompt = bool(st.session_state.pending_prompt)
+
+    if not has_messages:
+        if has_pending_prompt:
+            _render_waiting_indicator()
+            _process_pending_prompt(app)
+
+        first_prompt = _render_centered_prompt_form()
+        if first_prompt:
+            _queue_prompt(first_prompt)
+            st.rerun()
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            _render_message_content(message["content"])
+            image_path = message.get("image_path", "")
+            if image_path and Path(image_path).exists():
+                st.image(image_path, use_column_width=True)
 
     with st.sidebar:
         st.markdown("### Workspace")
@@ -709,16 +840,16 @@ def main() -> None:
         st.markdown("#### Export")
         _render_export_expander(app)
 
-    prompt = st.chat_input("Ask me about your data or even general questions")
-    if prompt:
-        _submit_prompt(app, prompt)
+    if has_messages:
+        if has_pending_prompt:
+            _render_waiting_indicator()
+            _process_pending_prompt(app)
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            _render_message_content(message["content"])
-            image_path = message.get("image_path", "")
-            if image_path and Path(image_path).exists():
-                st.image(image_path, use_column_width=True)
+        prompt = st.chat_input(
+            "Ask me about your data or even general questions")
+        if prompt:
+            _queue_prompt(prompt)
+            st.rerun()
 
 
 if __name__ == "__main__":
