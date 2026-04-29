@@ -1,8 +1,9 @@
 import os
 import hmac
 import re
+import time
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping, MutableMapping
 
 import streamlit as st
 
@@ -11,6 +12,12 @@ from app.env import load_environment
 
 
 CHATGPT_STYLE_PATH = Path(__file__).with_name("streamlit_app.css")
+AUTH_SESSION_KEYS = (
+    "authenticated",
+    "auth_provider",
+    "auth_principal",
+    "auth_last_verified_at",
+)
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -21,6 +28,150 @@ def _get_header_value(headers: Mapping[str, str], name: str) -> str:
     for key, value in headers.items():
         if key.lower() == name.lower():
             return value
+    return ""
+
+
+def _get_positive_int_env(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if not value:
+        return default
+
+    parsed = int(value)
+    if parsed <= 0:
+        raise ValueError(
+            f"Environment variable {name} must be a positive integer.")
+    return parsed
+
+
+def _is_anonymous_dev_auth_allowed() -> bool:
+    return os.environ.get("APP_ALLOW_ANONYMOUS_DEV_AUTH", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _get_dev_display_name() -> str:
+    configured_name = os.environ.get("APP_DEV_DISPLAY_NAME", "").strip()
+    if configured_name:
+        return configured_name
+    return os.environ.get("USERNAME", "").strip()
+
+
+def _clear_auth_session() -> None:
+    for key in AUTH_SESSION_KEYS:
+        st.session_state.pop(key, None)
+
+
+def _mark_authenticated(provider: str, principal: str = "") -> None:
+    st.session_state["authenticated"] = True
+    st.session_state["auth_provider"] = provider
+    if principal:
+        st.session_state["auth_principal"] = principal
+    else:
+        st.session_state.pop("auth_principal", None)
+    st.session_state["auth_last_verified_at"] = time.time()
+    st.session_state["auth_error_message"] = ""
+    st.session_state["password_attempt_count"] = 0
+    st.session_state["password_locked_until"] = 0.0
+
+
+def _get_ui_auth_principal() -> str:
+    principal = st.session_state.get("auth_principal", "").strip()
+    if principal:
+        return principal
+
+    auth_provider = st.session_state.get("auth_provider", "dev")
+    if auth_provider == "dev":
+        return _get_dev_display_name()
+    return ""
+
+
+def _expire_auth_session_if_needed(now: float | None = None) -> None:
+    if not st.session_state.get("authenticated"):
+        return
+
+    timeout_seconds = _get_positive_int_env(
+        "APP_AUTH_SESSION_TIMEOUT_SECONDS", 1800)
+    last_verified_at = float(st.session_state.get(
+        "auth_last_verified_at", 0.0) or 0.0)
+    if not last_verified_at:
+        st.session_state["auth_last_verified_at"] = now or time.time()
+        return
+
+    current_time = now or time.time()
+    if current_time - last_verified_at > timeout_seconds:
+        _clear_auth_session()
+        st.session_state["auth_error_message"] = "Session expired. Please sign in again."
+
+
+def _get_password_lock_state(
+    session_state: MutableMapping[str, Any], now: float | None = None
+) -> tuple[bool, str]:
+    locked_until = float(session_state.get(
+        "password_locked_until", 0.0) or 0.0)
+    if not locked_until:
+        return False, ""
+
+    current_time = now or time.time()
+    if current_time >= locked_until:
+        session_state["password_locked_until"] = 0.0
+        session_state["password_attempt_count"] = 0
+        return False, ""
+
+    remaining_seconds = max(1, int(locked_until - current_time))
+    return True, (
+        f"Too many incorrect password attempts. Try again in {remaining_seconds} second(s)."
+    )
+
+
+def _record_failed_password_attempt(
+    session_state: MutableMapping[str, Any], now: float | None = None
+) -> str:
+    max_attempts = _get_positive_int_env("APP_PASSWORD_MAX_ATTEMPTS", 5)
+    lockout_seconds = _get_positive_int_env("APP_PASSWORD_LOCKOUT_SECONDS", 60)
+
+    attempts = int(session_state.get("password_attempt_count", 0) or 0) + 1
+    session_state["password_attempt_count"] = attempts
+    if attempts >= max_attempts:
+        current_time = now or time.time()
+        session_state["password_locked_until"] = current_time + lockout_seconds
+        return (
+            f"Too many incorrect password attempts. Try again in {lockout_seconds} second(s)."
+        )
+    return "Incorrect password. Please try again."
+
+
+def _validate_trusted_header_auth_config(app_env: str) -> str:
+    trusted_header = os.environ.get("APP_TRUSTED_AUTH_HEADER", "").strip()
+    expected_value = os.environ.get("APP_TRUSTED_AUTH_VALUE", "").strip()
+    user_header = os.environ.get("APP_TRUSTED_USER_HEADER", "").strip()
+
+    if not trusted_header:
+        return ""
+
+    if app_env == "dev":
+        return ""
+
+    if not expected_value:
+        return (
+            "APP_TRUSTED_AUTH_VALUE must be configured when APP_TRUSTED_AUTH_HEADER "
+            "is used outside dev."
+        )
+
+    if not user_header:
+        return (
+            "APP_TRUSTED_USER_HEADER must be configured when trusted-header auth "
+            "is used outside dev."
+        )
+
+    if user_header.lower() == trusted_header.lower():
+        return (
+            "APP_TRUSTED_USER_HEADER must be different from APP_TRUSTED_AUTH_HEADER "
+            "outside dev."
+        )
+
     return ""
 
 
@@ -53,17 +204,27 @@ def _check_password() -> bool:
     password is configured, skip the gate entirely)."""
     load_environment()
     app_env = os.environ.get("APP_ENV", "dev").lower()
+    _expire_auth_session_if_needed()
+
+    trusted_auth_config_error = _validate_trusted_header_auth_config(app_env)
+    if trusted_auth_config_error:
+        st.set_page_config(
+            page_title="Earthquake Agent – Configuration Error", page_icon="🔒"
+        )
+        st.title("🔒 Authentication configuration error")
+        st.error(trusted_auth_config_error)
+        st.stop()
+        return False
+
     trusted_auth, principal = _check_trusted_header_auth(
         dict(st.context.headers))
     if trusted_auth:
-        st.session_state["authenticated"] = True
-        st.session_state["auth_provider"] = "trusted-header"
-        st.session_state["auth_principal"] = principal
+        _mark_authenticated("trusted-header", principal)
         return True
 
     required_password = os.environ.get("APP_PASSWORD", "")
     if not required_password:
-        if app_env == "dev":
+        if app_env == "dev" and _is_anonymous_dev_auth_allowed():
             return True
 
         st.set_page_config(
@@ -71,24 +232,37 @@ def _check_password() -> bool:
         )
         st.title("🔒 Password required")
         st.error(
-            "Configure APP_PASSWORD or a trusted auth header when APP_ENV is not 'dev'."
+            "Configure APP_PASSWORD or a trusted auth header. Anonymous access is only allowed when APP_ALLOW_ANONYMOUS_DEV_AUTH=true in dev."
         )
         st.stop()
         return False
 
     def _submit() -> None:
+        locked, message = _get_password_lock_state(st.session_state)
+        if locked:
+            st.session_state["auth_error_message"] = message
+            return
+
         entered = st.session_state.get("login_password", "")
+        entered_name = st.session_state.get("login_name", "").strip()
         if hmac.compare_digest(entered, required_password):
-            st.session_state["authenticated"] = True
-            st.session_state["auth_provider"] = "password"
+            _mark_authenticated("password", entered_name)
         else:
-            st.session_state["auth_error"] = True
+            st.session_state["auth_error_message"] = _record_failed_password_attempt(
+                st.session_state
+            )
 
     if st.session_state.get("authenticated"):
+        st.session_state["auth_last_verified_at"] = time.time()
         return True
 
     st.set_page_config(page_title="Earthquake Agent – Login", page_icon="🔒")
     st.title("🔒 Login required")
+    st.text_input(
+        "Name",
+        key="login_name",
+        help="Optional display name shown in the UI after sign-in.",
+    )
     st.text_input(
         "Password",
         type="password",
@@ -97,11 +271,18 @@ def _check_password() -> bool:
     )
     if st.button("Sign in"):
         _submit()
-    if st.session_state.get("auth_error"):
-        st.error("Incorrect password. Please try again.")
-        st.session_state["auth_error"] = False
+    auth_error_message = st.session_state.get("auth_error_message", "")
+    if auth_error_message:
+        st.error(auth_error_message)
+        st.session_state["auth_error_message"] = ""
     st.stop()
     return False  # never reached; st.stop() halts execution
+
+
+def _render_sign_out_button() -> None:
+    if st.button("Sign out", use_container_width=True):
+        _clear_auth_session()
+        st.rerun()
 
 
 def is_chart_request(question: str) -> bool:
@@ -175,8 +356,7 @@ def _process_pending_prompt(app: SqlAgentApp) -> None:
         st.session_state.pending_prompt_ready = False
         return
 
-    with st.spinner("Searching for an answer..."):
-        _submit_prompt(app, prompt)
+    _submit_prompt(app, prompt)
 
     st.session_state.pending_prompt = ""
     st.session_state.awaiting_response = False
@@ -346,9 +526,12 @@ def _render_starter_prompts(app: SqlAgentApp) -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def _render_centered_prompt_form() -> str | None:
+def _render_centered_prompt_form(*, show_loading: bool = False) -> str | None:
     outer_left, prompt_area, outer_right = st.columns([1.3, 6.7, 1])
     with prompt_area:
+        if show_loading:
+            _render_loading_status(compact=True)
+
         st.markdown('<div class="centered-prompt-shell">',
                     unsafe_allow_html=True)
         with st.form("center_prompt_form", clear_on_submit=True, border=False):
@@ -367,6 +550,24 @@ def _render_centered_prompt_form() -> str | None:
     if submitted and prompt.strip():
         return prompt.strip()
     return None
+
+
+def _render_loading_status(*, floating: bool = False, compact: bool = False) -> None:
+    class_names = ["floating-answer-status"]
+    if floating:
+        class_names.append("floating-answer-status--fixed")
+    if compact:
+        class_names.append("floating-answer-status--compact")
+
+    st.markdown(
+        f"""
+        <div class="{' '.join(class_names)}" aria-live="polite">
+            <span class="floating-answer-status__spinner" aria-hidden="true"></span>
+            <span class="floating-answer-status__label">Searching for an answer...</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _has_assistant_messages() -> bool:
@@ -444,17 +645,19 @@ def main() -> None:
     has_pending_prompt = bool(st.session_state.pending_prompt)
 
     if not has_messages:
+        first_prompt = _render_centered_prompt_form(
+            show_loading=has_pending_prompt and st.session_state.pending_prompt_ready
+        )
+        if first_prompt:
+            _queue_prompt(first_prompt)
+            st.rerun()
+
         if has_pending_prompt:
             if st.session_state.pending_prompt_ready:
                 _process_pending_prompt(app)
             else:
                 st.session_state.pending_prompt_ready = True
                 st.rerun()
-
-        first_prompt = _render_centered_prompt_form()
-        if first_prompt:
-            _queue_prompt(first_prompt)
-            st.rerun()
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -467,11 +670,13 @@ def main() -> None:
         st.markdown("### Workspace")
         st.caption("Chat, charts, context, and export tools.")
         auth_provider = st.session_state.get("auth_provider", "dev")
-        auth_principal = st.session_state.get("auth_principal", "")
+        auth_principal = _get_ui_auth_principal()
         if auth_principal:
             st.caption(f"Authenticated via {auth_provider}: {auth_principal}")
         elif auth_provider != "dev":
             st.caption(f"Authenticated via {auth_provider}")
+        if st.session_state.get("authenticated"):
+            _render_sign_out_button()
 
         st.divider()
         st.markdown("#### Actions")
@@ -527,18 +732,21 @@ def main() -> None:
         _render_export_expander(app)
 
     if has_messages:
-        if has_pending_prompt:
-            if st.session_state.pending_prompt_ready:
-                _process_pending_prompt(app)
-            else:
-                st.session_state.pending_prompt_ready = True
-                st.rerun()
+        if has_pending_prompt and st.session_state.pending_prompt_ready:
+            _render_loading_status(floating=True)
 
         prompt = st.chat_input(
             "Ask me about your data or even general questions")
         if prompt:
             _queue_prompt(prompt)
             st.rerun()
+
+        if has_pending_prompt:
+            if st.session_state.pending_prompt_ready:
+                _process_pending_prompt(app)
+            else:
+                st.session_state.pending_prompt_ready = True
+                st.rerun()
 
 
 if __name__ == "__main__":

@@ -18,7 +18,29 @@ X-Forwarded-Authenticated: true
 X-Authenticated-User: alice@example.com
 ```
 
-When those headers are missing, `APP_ENV=dev` still allows the app to run without a login screen.
+When those headers are missing, anonymous access is only allowed in dev when `APP_ALLOW_ANONYMOUS_DEV_AUTH=true` is explicitly set.
+
+Security defaults:
+
+- `APP_ENABLE_VERBOSE_AGENT_LOGS` must remain disabled outside dev.
+- Password auth now enforces a temporary lockout after repeated failures.
+- Password-auth sessions expire automatically unless revalidated.
+- Outside dev, trusted-header auth must include `APP_TRUSTED_AUTH_HEADER`, `APP_TRUSTED_AUTH_VALUE`, and a distinct `APP_TRUSTED_USER_HEADER`.
+
+Environment template:
+
+- Start from [`.env.example`](e:/Repo/PythonProject/python-for-ai/.env.example) and copy it to `.env.dev` or `.env.prod`.
+
+Deployment checklist:
+
+- Set `APP_ENV=prod` for any real deployment.
+- Choose one auth mode only: `APP_PASSWORD` or trusted-header auth.
+- If using trusted-header auth outside dev, set `APP_TRUSTED_AUTH_HEADER`, `APP_TRUSTED_AUTH_VALUE`, and `APP_TRUSTED_USER_HEADER` to distinct, proxy-controlled headers.
+- Keep `APP_ALLOW_ANONYMOUS_DEV_AUTH=false` outside local development.
+- Keep `APP_ENABLE_VERBOSE_AGENT_LOGS=false` outside dev.
+- Set `SQL_ALLOWED_TABLES` to the minimum table/view allowlist needed by the app.
+- Keep `APP_MAX_EXPORT_ROWS` conservative for your data sensitivity.
+- Put Streamlit behind a reverse proxy or gateway that strips inbound auth headers from clients and injects the trusted headers itself.
 
 Local proxy helper:
 

@@ -75,9 +75,15 @@ def load_config() -> AppConfig:
 
     app_env = os.getenv("APP_ENV", "dev").lower()
     sql_allowed_tables = _get_csv_env("SQL_ALLOWED_TABLES")
+    agent_verbose_logging = _get_bool_env(
+        "APP_ENABLE_VERBOSE_AGENT_LOGS", False)
     if app_env != "dev" and not sql_allowed_tables:
         raise ValueError(
             "SQL_ALLOWED_TABLES must be configured when APP_ENV is not 'dev'."
+        )
+    if app_env != "dev" and agent_verbose_logging:
+        raise ValueError(
+            "APP_ENABLE_VERBOSE_AGENT_LOGS must be disabled when APP_ENV is not 'dev'."
         )
 
     return AppConfig(
@@ -93,7 +99,6 @@ def load_config() -> AppConfig:
         azure_openai_api_key=os.environ["AZURE_OPENAI_API_KEY"],
         azure_openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
         azure_openai_deployment=os.environ["AZURE_OPENAI_DEPLOYMENT"],
-        agent_verbose_logging=_get_bool_env(
-            "APP_ENABLE_VERBOSE_AGENT_LOGS", False),
+        agent_verbose_logging=agent_verbose_logging,
         max_export_rows=_get_positive_int_env("APP_MAX_EXPORT_ROWS", 500),
     )
