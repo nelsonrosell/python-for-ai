@@ -1,35 +1,9 @@
 import os
 from dataclasses import dataclass
-from pathlib import Path
-
-from dotenv import load_dotenv
+from .env import load_environment
 
 
-def _load_env() -> None:
-    """Load defaults from .env, then override with .env.<APP_ENV> if present."""
-    env = os.getenv("APP_ENV", "dev").lower()
-    base_dir = Path(__file__).resolve().parent.parent
-    env_file = base_dir / f".env.{env}"
-    fallback = base_dir / ".env"
-    loaded_any = False
-
-    if fallback.exists():
-        # Base defaults.
-        load_dotenv(fallback, override=False)
-        loaded_any = True
-
-    if env_file.exists():
-        # Environment-specific values override defaults.
-        load_dotenv(env_file, override=True)
-        loaded_any = True
-
-    if not loaded_any:
-        raise FileNotFoundError(
-            f"No environment file found. Expected '{env_file}' or '{fallback}'."
-        )
-
-
-_load_env()
+load_environment()
 
 
 @dataclass(frozen=True)
@@ -70,7 +44,8 @@ def _get_positive_int_env(name: str, default: int) -> int:
 
     parsed = int(value)
     if parsed <= 0:
-        raise ValueError(f"Environment variable {name} must be a positive integer.")
+        raise ValueError(
+            f"Environment variable {name} must be a positive integer.")
     return parsed
 
 
@@ -95,7 +70,8 @@ def load_config() -> AppConfig:
     missing = [key for key in REQUIRED_KEYS if not os.getenv(key)]
     if missing:
         missing_keys = ", ".join(missing)
-        raise ValueError(f"Missing required environment variables: {missing_keys}")
+        raise ValueError(
+            f"Missing required environment variables: {missing_keys}")
 
     app_env = os.getenv("APP_ENV", "dev").lower()
     sql_allowed_tables = _get_csv_env("SQL_ALLOWED_TABLES")
@@ -117,6 +93,7 @@ def load_config() -> AppConfig:
         azure_openai_api_key=os.environ["AZURE_OPENAI_API_KEY"],
         azure_openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
         azure_openai_deployment=os.environ["AZURE_OPENAI_DEPLOYMENT"],
-        agent_verbose_logging=_get_bool_env("APP_ENABLE_VERBOSE_AGENT_LOGS", False),
+        agent_verbose_logging=_get_bool_env(
+            "APP_ENABLE_VERBOSE_AGENT_LOGS", False),
         max_export_rows=_get_positive_int_env("APP_MAX_EXPORT_ROWS", 500),
     )

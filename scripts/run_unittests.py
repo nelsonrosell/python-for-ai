@@ -1,5 +1,12 @@
 import argparse
+from pathlib import Path
+import sys
 import unittest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 class _Color:
@@ -17,15 +24,20 @@ def _colorize(text: str, color: str) -> str:
 class ColorTextTestResult(unittest.TextTestResult):
     def addSuccess(self, test: unittest.case.TestCase) -> None:
         super().addSuccess(test)
-        self.stream.writeln(f"{test.id()} ... {_colorize('✓ OK', _Color.GREEN)}")
+        self.stream.writeln(
+            f"{test.id()} ... {_colorize('✓ OK', _Color.GREEN)}")
 
-    def addFailure(self, test: unittest.case.TestCase, err) -> None:  # type: ignore[override]
+    # type: ignore[override]
+    def addFailure(self, test: unittest.case.TestCase, err) -> None:
         super().addFailure(test, err)
-        self.stream.writeln(f"{test.id()} ... {_colorize('X FAILED', _Color.RED)}")
+        self.stream.writeln(
+            f"{test.id()} ... {_colorize('X FAILED', _Color.RED)}")
 
-    def addError(self, test: unittest.case.TestCase, err) -> None:  # type: ignore[override]
+    # type: ignore[override]
+    def addError(self, test: unittest.case.TestCase, err) -> None:
         super().addError(test, err)
-        self.stream.writeln(f"{test.id()} ... {_colorize('! ERROR', _Color.RED)}")
+        self.stream.writeln(
+            f"{test.id()} ... {_colorize('! ERROR', _Color.RED)}")
 
     def addSkip(self, test: unittest.case.TestCase, reason: str) -> None:
         super().addSkip(test, reason)
@@ -33,7 +45,8 @@ class ColorTextTestResult(unittest.TextTestResult):
             f"{test.id()} ... {_colorize(f'→ SKIPPED ({reason})', _Color.YELLOW)}"
         )
 
-    def addExpectedFailure(self, test: unittest.case.TestCase, err) -> None:  # type: ignore[override]
+    # type: ignore[override]
+    def addExpectedFailure(self, test: unittest.case.TestCase, err) -> None:
         super().addExpectedFailure(test, err)
         self.stream.writeln(
             f"{test.id()} ... {_colorize('~ EXPECTED FAILURE', _Color.YELLOW)}"

@@ -1,0 +1,6 @@
+-r base.txt
+debugpy==1.8.20
+ipykernel==7.2.0
+ipython==9.10.1
+pytest==9.0.3
+pytest-sugar==1.1.1

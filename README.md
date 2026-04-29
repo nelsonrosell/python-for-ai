@@ -2,6 +2,34 @@
 
 ## Prompt to answer flow
 
+To load Streamlit UI
+python -m streamlit run streamlit_app.py
+
+Trusted-header dev auth test:
+
+```powershell
+.\.venv\Scripts\python .\scripts\test_trusted_auth_headers.py --url http://localhost:8501/ --user alice@example.com
+```
+
+If `.env.dev` is using trusted-header auth, the app expects:
+
+```text
+X-Forwarded-Authenticated: true
+X-Authenticated-User: alice@example.com
+```
+
+When those headers are missing, `APP_ENV=dev` still allows the app to run without a login screen.
+
+Local proxy helper:
+
+```powershell
+.\.venv\Scripts\python .\scripts\dev_auth_proxy.py --listen-port 8601 --backend-url http://localhost:8501 --user alice@example.com
+```
+
+Then browse to `http://127.0.0.1:8601/`.
+
+Note: this helper is intentionally small and only proxies normal HTTP requests. It does not proxy WebSockets, so it is best used as a local smoke-test aid rather than a production-style front end.
+
 High-level view:
 
 ```mermaid
@@ -79,6 +107,14 @@ Key code paths:
 
 ## Run tests
 
+## Project layout
+
+- `app/` contains the application logic, config, SQL agent, export helpers, and visualization code.
+- `streamlit_app.py` is the active Streamlit entrypoint.
+- `scripts/` contains helper and maintenance scripts.
+- `docs/architecture/` contains Mermaid diagrams and architecture artifacts.
+- `requirements/base.txt` contains runtime dependencies and `requirements/dev.txt` layers on development-only packages.
+
 For the nicest colored output, use `pytest`:
 
 ```powershell
@@ -108,25 +144,25 @@ Run one specific test method with `pytest`:
 From the repository root:
 
 ```powershell
-.\.venv\Scripts\python .\run_unittests.py
+.\.venv\Scripts\python .\scripts\run_unittests.py
 ```
 
 Run the targeted security-related tests:
 
 ```powershell
-.\.venv\Scripts\python .\run_unittests.py tests.test_config tests.test_sql_security tests.test_streamlit_auth
+.\.venv\Scripts\python .\scripts\run_unittests.py tests.test_config tests.test_sql_security tests.test_streamlit_auth
 ```
 
 Run one test module in verbose mode:
 
 ```powershell
-.\.venv\Scripts\python .\run_unittests.py tests.test_streamlit_auth
+.\.venv\Scripts\python .\scripts\run_unittests.py tests.test_streamlit_auth
 ```
 
 Run one specific test method:
 
 ```powershell
-.\.venv\Scripts\python .\run_unittests.py tests.test_streamlit_auth.TestStreamlitAuth.test_trusted_header_auth_uses_header_value_as_principal
+.\.venv\Scripts\python .\scripts\run_unittests.py tests.test_streamlit_auth.TestStreamlitAuth.test_trusted_header_auth_uses_header_value_as_principal
 ```
 
 ## VS Code task
@@ -142,7 +178,7 @@ There are also unittest-based tasks if you want the custom `run_unittests.py` fo
 A VS Code task named `Run unittest suite` is available and runs:
 
 ```powershell
-.\.venv\Scripts\python .\run_unittests.py
+.\.venv\Scripts\python .\scripts\run_unittests.py
 ```
 
 You can run it from `Terminal: Run Task` in VS Code.

@@ -17,6 +17,8 @@ class TestStreamlitAuth(unittest.TestCase):
         os.environ,
         {
             "APP_TRUSTED_AUTH_HEADER": "X-Authenticated-User",
+            "APP_TRUSTED_AUTH_VALUE": "",
+            "APP_TRUSTED_USER_HEADER": "",
         },
         clear=False,
     )
