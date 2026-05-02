@@ -1,0 +1,351 @@
+:root {
+    --surface: var(--background-color);
+    --surface-alt: var(--secondary-background-color);
+    --border: color-mix(in srgb, var(--text-color) 12%, transparent);
+    --text: var(--text-color);
+    --text-muted: color-mix(in srgb, var(--text-color) 62%, transparent);
+    --accent: var(--primary-color);
+    --content-width: 700px;
+    --prompt-width: 580px;
+    --content-inset: 1.35rem;
+}
+
+[data-testid="stSidebar"] {
+    border-right: 1px solid var(--border);
+}
+
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span {
+    color: var(--text);
+}
+
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stDownloadButton > button {
+    border-radius: 0.9rem;
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+    color: var(--text);
+}
+
+[data-testid="stSidebar"] textarea {
+    border-radius: 0.85rem;
+}
+
+[data-testid="stTextInputRootElement"] {
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    box-shadow: none;
+    background: var(--surface);
+}
+
+[data-testid="stTextInputRootElement"]:focus-within {
+    border-color: var(--border);
+    box-shadow: none;
+}
+
+[data-testid="stTextInputRootElement"] input {
+    box-shadow: none;
+}
+
+[data-testid="stTextInputRootElement"]:has(input[aria-invalid="true"]) {
+    border-color: var(--border);
+    box-shadow: none;
+}
+
+.stButton > button {
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+    color: var(--text);
+    padding: 0.38rem 0.85rem;
+    min-height: 0;
+}
+
+.stButton > button p {
+    font-size: 0.86rem;
+}
+
+[data-testid="stMainBlockContainer"] {
+    max-width: 980px;
+    padding-top: 1.5rem;
+    padding-bottom: 6rem;
+}
+
+.chat-shell {
+    margin: 0 auto 1.4rem auto;
+    max-width: var(--content-width);
+    padding: 1.2rem 1.35rem;
+    border: 1px solid var(--border);
+    border-radius: 1.2rem;
+    backdrop-filter: blur(18px);
+}
+
+.centered-prompt-shell {
+    max-width: var(--content-width);
+    margin: 0 auto 1.25rem auto;
+    transform: translateX(4px);
+    padding-left: var(--content-inset);
+    padding-right: var(--content-inset);
+    box-sizing: border-box;
+}
+
+.st-key-FormSubmitter-center_prompt_form,
+.st-key-FormSubmitter-center_prompt_form [data-testid="stFormSubmitButton"] {
+    display: none;
+}
+
+.chat-shell h1 {
+    margin: 0 0 0 9px;
+    color: var(--text);
+    font-size: 1.9rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+}
+
+.chat-shell p {
+    margin: 0.45rem 0 0 9px;
+    color: var(--text-muted);
+    line-height: 1.55;
+}
+
+.chat-shell .pill-row {
+    display: flex;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+    margin-top: 0.95rem;
+}
+
+.chat-shell .pill {
+    padding: 0.36rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+    color: var(--text);
+    font-size: 0.84rem;
+}
+
+.welcome-card {
+    margin: 1.2rem auto 1.6rem auto;
+    max-width: 720px;
+    padding: 1.1rem 1.2rem;
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+}
+
+.welcome-card strong {
+    color: var(--text);
+}
+
+.welcome-card p {
+    margin: 0.2rem 0 0 0;
+    color: var(--text-muted);
+}
+
+.stChatMessage,
+.stChatMessage[data-testid="stChatMessage"] {
+    margin-bottom: 1rem;
+    padding-top: 1rem;
+    padding-right: 1.15rem;
+    padding-bottom: 1rem;
+    padding-left: 2.6rem !important;
+    border: 1px solid var(--border);
+    border-radius: 1.15rem;
+    max-width: 86%;
+}
+
+.stChatMessage:last-of-type {
+    margin-bottom: 0.3rem;
+}
+
+[aria-label="Chat message from user"] {
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    margin-left: 0;
+    margin-right: auto;
+    max-width: 72%;
+}
+
+[aria-label="Chat message from assistant"] {
+    border-color: var(--border);
+    margin-left: auto;
+    margin-right: 0;
+}
+
+[aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] p,
+[aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] li,
+[aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] span {
+    color: var(--text);
+    text-align: left;
+}
+
+.stChatMessage [data-testid="stMarkdownContainer"] {
+    padding-left: 0.85rem !important;
+}
+
+.stChatMessage [data-testid="stMarkdownContainer"] p,
+.stChatMessage [data-testid="stMarkdownContainer"] li,
+.stChatMessage [data-testid="stMarkdownContainer"] span {
+    color: var(--text);
+    line-height: 1.65;
+}
+
+.export-expander {
+    margin: 0 auto 1.4rem auto;
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    overflow: hidden;
+}
+
+.export-expander [data-testid="stExpander"] {
+    border: none;
+    background: transparent;
+}
+
+.export-expander [data-testid="stExpander"] details {
+    background: transparent;
+}
+
+.export-expander [data-testid="stExpander"] summary {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.export-expander [data-testid="stExpanderDetails"] {
+    background: transparent;
+}
+
+.starter-prompts {
+    margin-top: 0.7rem;
+}
+
+.floating-answer-status {
+    width: min(100%, var(--prompt-width));
+    margin: 0 auto 0.75rem auto;
+    padding: 0.7rem 0.95rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    box-shadow: 0 14px 38px rgba(15, 23, 42, 0.12);
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--text);
+    backdrop-filter: blur(18px);
+    box-sizing: border-box;
+}
+
+.floating-answer-status--compact {
+    margin-bottom: 0.35rem;
+}
+
+.floating-answer-status--fixed {
+    position: fixed;
+    left: 50%;
+    bottom: 5.6rem;
+    width: min(var(--prompt-width), calc(100vw - 2rem));
+    margin: 0;
+    transform: translateX(-50%);
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.floating-answer-status__spinner {
+    width: 1rem;
+    height: 1rem;
+    display: inline-block;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    border: 2px solid rgba(128, 128, 128, 0.28);
+    border-top-color: var(--accent);
+    border-right-color: var(--accent);
+    animation: floating-answer-status-spin 0.85s linear infinite;
+}
+
+.floating-answer-status__label {
+    font-size: 0.92rem;
+    font-weight: 500;
+}
+
+@keyframes floating-answer-status-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+[data-testid="stChatInput"] {
+    max-width: var(--content-width);
+    padding-left: var(--content-inset);
+    padding-right: var(--content-inset);
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+[data-testid="stChatInput"] > div {
+    width: min(100%, var(--prompt-width));
+    max-width: var(--prompt-width);
+    margin-right: auto;
+}
+
+[data-testid="stChatInput"] button {
+    display: none;
+}
+
+[data-testid="stChatInput"] [data-baseweb="textarea"] {
+    border-color: transparent;
+    box-shadow: none;
+    background: var(--surface);
+    justify-content: flex-start;
+    text-align: left;
+    width: 100%;
+}
+
+[data-testid="stChatInput"] [data-baseweb="textarea"]:focus-within {
+    border-color: transparent;
+    box-shadow: none;
+}
+
+[data-testid="stChatInput"] textarea {
+    box-shadow: none;
+    outline: none;
+    text-align: left;
+    padding-left: 0.75rem;
+}
+
+[data-testid="stChatInput"] [data-baseweb="textarea"]:has(textarea[aria-invalid="true"]) {
+    border-color: transparent;
+    box-shadow: none;
+}
+
+.block-container {
+    padding-left: 1.8rem;
+    padding-right: 1.8rem;
+}
+
+@media (max-width: 900px) {
+    .floating-answer-status {
+        width: 100%;
+    }
+
+    .floating-answer-status--fixed {
+        left: 1rem;
+        right: 1rem;
+        bottom: 5.2rem;
+        width: auto;
+        transform: none;
+    }
+
+    .block-container {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    [data-testid="stChatInput"] {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .chat-shell h1 {
+        font-size: 1.55rem;
+    }
+}

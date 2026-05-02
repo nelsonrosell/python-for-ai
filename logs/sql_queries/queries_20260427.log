@@ -1,0 +1,6 @@
+[2026-04-27T16:21:39.536644] ALLOWED | User: demo_user | Query: SELECT TOP 10 * FROM vw_earthquake_summary WHERE magnitude > 5 | Reason: None
+[2026-04-27T16:21:39.536644] BLOCKED | User: demo_user | Query: DELETE FROM earthquakes WHERE magnitude < 3 | Reason: Blocked operation: DELETE
+[2026-04-27T16:21:39.536644] BLOCKED | User: demo_user | Query: UPDATE earthquakes SET magnitude = 0 WHERE id = 1 | Reason: Blocked operation: UPDATE
+[2026-04-27T16:21:39.551744] BLOCKED | User: demo_user | Query: DROP TABLE earthquakes | Reason: Blocked operation: DROP
+[2026-04-27T16:21:39.552748] BLOCKED | User: demo_user | Query: ALTER TABLE earthquakes ADD COLUMN fake_column INT | Reason: Blocked operation: ALTER
+[2026-04-27T16:21:39.554520] BLOCKED | User: demo_user | Query: SELECT * FROM earthquakes WHERE id = '1' OR '1'='1' | Reason: Potential SQL injection detected

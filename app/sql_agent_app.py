@@ -1,4 +1,6 @@
 import struct
+import re
+import warnings
 from urllib.parse import quote_plus
 from typing import Any
 
@@ -20,6 +22,17 @@ from .visualization import EarthquakeVisualizer
 
 SQL_ACCESS_TOKEN_ATTRIBUTE = 1256
 SQL_ACCESS_TOKEN_SCOPE = "https://database.windows.net/.default"
+DEFAULT_MAX_EXPORT_ROWS = 500
+warnings.filterwarnings(
+    "ignore",
+    message=r"response_mode='form_post' is recommended for better security\..*",
+    category=UserWarning,
+    module=r"msal\.oauth2cli\.oauth2",
+)
+_TABLE_REFERENCE_PATTERN = re.compile(
+    r'\b(?:FROM|JOIN)\s+([A-Za-z0-9_\.\[\]"]+)', re.IGNORECASE
+)
+_CTE_PATTERN = re.compile(r"\bWITH\s+([A-Za-z0-9_]+)\s+AS\b", re.IGNORECASE)
 SQL_AGENT_PREFIX = """
 You are an agent designed to interact with a Microsoft SQL Server-compatible database (Microsoft Fabric SQL endpoint).
 
@@ -42,15 +55,24 @@ When writing SQL:
 
 class SqlAgentApp:
     def __init__(self, config: AppConfig | None = None) -> None:
+        """Initialise the app: connect to the database, apply the SQL guard,
+        create the LLM, the visualizer, and the LangChain agent.
+        Accepts an optional pre-built AppConfig; otherwise loads one from env.
+        """
         self.config = config or load_config()
         self.db = self._create_db()
-        self.agent = self._create_agent()
+        # guard applied at db.run() so all execution paths are covered
+        self._patch_db_with_guard()
         self.general_llm = self._create_llm()
         self.visualizer = EarthquakeVisualizer()
         self.chat_history: list[dict[str, str]] = []
         self.max_history_turns = 8
+        self.agent = self._create_agent()
 
     def _create_llm(self) -> AzureChatOpenAI:
+        """Instantiate and return an AzureChatOpenAI client using credentials
+        from the app config. Temperature is fixed at 0 for deterministic SQL generation.
+        """
         return AzureChatOpenAI(
             azure_endpoint=self.config.azure_openai_endpoint,
             api_key=self.config.azure_openai_api_key,
@@ -60,32 +82,52 @@ class SqlAgentApp:
         )
 
     def _is_sqlalchemy_uri(self, connection_string: str) -> bool:
+        """Return True if the connection string is a SQLAlchemy URI (contains '://'),
+        as opposed to a raw ODBC connection string.
+        """
         return "://" in connection_string
 
     def _create_token_credential(self) -> ChainedTokenCredential:
+        """Build a ChainedTokenCredential that tries, in order:
+        1. InteractiveBrowserCredential with a login hint (if configured).
+        2. AzureCliCredential (works when the developer is already logged in via 'az login').
+        3. InteractiveBrowserCredential without a hint (fallback pop-up).
+
+        When a login hint is configured, prefer the interactive credential first
+        so the app authenticates with that intended Entra user instead of any
+        unrelated Azure CLI session already present on the machine.
+        """
         credentials = []
 
         if self.config.sql_entra_login_hint:
             credentials.append(
                 InteractiveBrowserCredential(
                     login_hint=self.config.sql_entra_login_hint,
-                    response_mode="form_post",
                 )
             )
 
         credentials.append(AzureCliCredential())
 
         if not self.config.sql_entra_login_hint:
-            credentials.append(InteractiveBrowserCredential(
-                response_mode="form_post"))
+            credentials.append(InteractiveBrowserCredential())
 
         return ChainedTokenCredential(*credentials)
 
     def _build_access_token_struct(self, token: str) -> bytes:
+        """Encode a bearer token string into the binary struct expected by the
+        ODBC SQL_ACCESS_TOKEN connection attribute (SQL_COPT_SS_ACCESS_TOKEN).
+        The format is a 4-byte little-endian length prefix followed by the
+        token encoded as UTF-16 LE.
+        """
         token_bytes = token.encode("utf-16-le")
         return struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
 
     def _build_token_ready_connection_string(self) -> str:
+        """Produce a clean ODBC connection string suitable for token-based auth.
+        Strips credentials fields (UID, PWD, Authentication, Trusted_Connection)
+        from both SQLAlchemy URIs and raw ODBC strings so the token injected
+        via the do_connect event is the sole auth mechanism.
+        """
         if self._is_sqlalchemy_uri(self.config.sql_connection_string):
             url = make_url(self.config.sql_connection_string)
             parts = []
@@ -136,11 +178,18 @@ class SqlAgentApp:
         return ";".join(filtered_parts) + ";"
 
     def _create_db(self) -> SQLDatabase:
+        """Create and return a LangChain SQLDatabase wrapper.
+        Supports three connection modes in order of priority:
+        1. Entra ID access-token auth: injects a fresh OAuth token on every
+           connection via a SQLAlchemy 'do_connect' event.
+        2. SQLAlchemy URI: passed directly to SQLDatabase.from_uri().
+        3. Raw ODBC string: URL-encoded and wrapped in an mssql+pyodbc engine.
+        """
+        include_tables = list(self.config.sql_allowed_tables) or None
+
         if self.config.sql_use_access_token_auth:
-            odbc_connect = quote_plus(
-                self._build_token_ready_connection_string())
-            engine = create_engine(
-                f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
+            odbc_connect = quote_plus(self._build_token_ready_connection_string())
+            engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
             credential = self._create_token_credential()
 
             @event.listens_for(engine, "do_connect")
@@ -154,29 +203,152 @@ class SqlAgentApp:
                 )
                 cparams["attrs_before"] = attrs_before
 
-            return SQLDatabase(engine)
+            return SQLDatabase(engine, include_tables=include_tables)
 
         if self._is_sqlalchemy_uri(self.config.sql_connection_string):
-            return SQLDatabase.from_uri(self.config.sql_connection_string)
+            return SQLDatabase.from_uri(
+                self.config.sql_connection_string,
+                include_tables=include_tables,
+            )
 
         odbc_connect = quote_plus(self.config.sql_connection_string)
         engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
-        return SQLDatabase(engine)
+        return SQLDatabase(engine, include_tables=include_tables)
+
+    _BLOCKED_SQL_COMMANDS = re.compile(
+        r"\b(DELETE|UPDATE|INSERT|MERGE|DROP|ALTER|CREATE|TRUNCATE|EXEC(UTE)?)\b",
+        re.IGNORECASE,
+    )
+    _SELECT_INTO_PATTERN = re.compile(r"\bSELECT\b[\s\S]*\bINTO\b", re.IGNORECASE)
+    _EXPORT_TOP_PATTERN = re.compile(
+        r"^\s*SELECT\s+(?:DISTINCT\s+)?TOP\s*(?:\(\s*(\d+)\s*\)|(\d+))\b",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _validate_sql(cls, query: str) -> str | None:
+        """Return an error string if the query contains a blocked command, else None."""
+        normalized = query.strip()
+        if not normalized:
+            return "Blocked: empty SQL statements are not permitted."
+
+        if any(token in normalized for token in ("--", "/*", "*/")):
+            return "Blocked: SQL comments are not permitted."
+
+        if ";" in normalized.rstrip().rstrip(";"):
+            return "Blocked: multiple SQL statements are not permitted."
+
+        match = cls._BLOCKED_SQL_COMMANDS.search(query)
+        if match:
+            return f"Blocked: '{match.group().upper()}' statements are not permitted."
+
+        if cls._SELECT_INTO_PATTERN.search(query):
+            return "Blocked: 'SELECT INTO' statements are not permitted."
+
+        return None
+
+    def _get_max_export_rows(self) -> int:
+        return getattr(self.config, "max_export_rows", DEFAULT_MAX_EXPORT_ROWS)
+
+    @staticmethod
+    def _normalize_table_identifier(identifier: str) -> str:
+        cleaned = identifier.strip().strip(",")
+        parts = [part.strip('[]"') for part in cleaned.split(".") if part.strip()]
+        if not parts:
+            return ""
+        return parts[-1].lower()
+
+    def _validate_allowed_tables(self, sql_query: str) -> str | None:
+        if not self.config.sql_allowed_tables:
+            return None
+
+        allowed_tables = {
+            self._normalize_table_identifier(table)
+            for table in self.config.sql_allowed_tables
+        }
+        cte_names = {
+            self._normalize_table_identifier(match.group(1))
+            for match in _CTE_PATTERN.finditer(sql_query)
+        }
+
+        referenced_tables = {
+            self._normalize_table_identifier(match.group(1))
+            for match in _TABLE_REFERENCE_PATTERN.finditer(sql_query)
+        }
+        referenced_tables = {table for table in referenced_tables if table}
+        disallowed_tables = sorted(
+            table
+            for table in referenced_tables
+            if table not in allowed_tables and table not in cte_names
+        )
+        if disallowed_tables:
+            formatted = ", ".join(disallowed_tables)
+            return f"Blocked: query references non-allowlisted tables: {formatted}."
+        return None
+
+    def _validate_query(self, sql_query: str) -> str | None:
+        error = self._validate_sql(sql_query)
+        if error:
+            return error
+        return self._validate_allowed_tables(sql_query)
+
+    def _build_agent_prefix(self) -> str:
+        prefix = SQL_AGENT_PREFIX
+        if self.config.sql_allowed_tables:
+            allowed = ", ".join(self.config.sql_allowed_tables)
+            prefix += (
+                "\n\nAllowed tables/views: "
+                f"{allowed}. Never query tables outside this allowlist."
+            )
+        return prefix
+
+    def _validate_export_query(self, sql_query: str) -> None:
+        top_match = self._EXPORT_TOP_PATTERN.match(sql_query)
+        max_export_rows = self._get_max_export_rows()
+        if not top_match:
+            raise ValueError(
+                f"Export queries must begin with SELECT TOP (n), where n <= {max_export_rows}."
+            )
+
+        row_limit = int(top_match.group(1) or top_match.group(2))
+        if row_limit > max_export_rows:
+            raise ValueError(
+                f"Export queries are limited to TOP ({max_export_rows}) rows."
+            )
+
+    def _patch_db_with_guard(self) -> None:
+        """Patch self.db.run() so the keyword guard applies to every execution path,
+        including toolkit tools and any future code that calls db.run() directly."""
+        original_run = self.db.run
+
+        def guarded_run(command: str, *args: Any, **kwargs: Any) -> str:
+            query_text = command if isinstance(command, str) else str(command)
+            error = self._validate_query(query_text)
+            if error:
+                return error
+            return original_run(command, *args, **kwargs)
+
+        self.db.run = guarded_run  # type: ignore[method-assign]
 
     def _create_agent(self) -> Any:
+        """Create the LangChain SQL Agent."""
         llm = self._create_llm()
         return create_sql_agent(
             llm=llm,
             db=self.db,
-            verbose=True,
+            verbose=self.config.agent_verbose_logging,
             agent_type="tool-calling",
-            prefix=SQL_AGENT_PREFIX,
+            prefix=self._build_agent_prefix(),
             top_k=3,
             max_iterations=5,
             agent_executor_kwargs={"handle_parsing_errors": True},
         )
 
     def _is_database_question(self, question: str) -> bool:
+        """Return True if the question appears to be about the database.
+        Uses a keyword heuristic (earthquake domain terms, SQL keywords, etc.)
+        to decide whether to route through the SQL agent or the general LLM.
+        """
         normalized = question.lower()
         db_terms = [
             "database",
@@ -203,23 +375,229 @@ class SqlAgentApp:
         return any(term in normalized for term in db_terms)
 
     def _is_follow_up_question(self, question: str) -> bool:
+        """Return True if the question is a follow-up to a previous turn.
+        Detects follow-ups via known phrases ('what does this mean', 'how about'),
+        anaphoric pronouns ('this', 'they', 'them'), or short questions (≤ 6 words)
+        when chat history is non-empty.
+        """
         normalized = question.lower().strip()
-        follow_up_tokens = [
-            "these",
-            "those",
-            "that",
-            "it",
-            "they",
-            "them",
+        follow_up_phrases = [
             "what does this",
             "what do these",
-            "can you explain",
             "what does that mean",
             "what are these",
+            "can you explain",
+            "same query",
+            "same result",
+            "same as above",
+            "previous result",
+            "above result",
+            "the list",
+            "this list",
+            "that list",
+            "these results",
+            "those results",
+            "how about",
+            "what about",
+            "and in",
+            "and for",
+            "what about",
+            "more about",
+            "tell me more",
+            "go on",
+            "and what",
+            "also in",
+            "also for",
         ]
-        return any(token in normalized for token in follow_up_tokens)
+        if any(phrase in normalized for phrase in follow_up_phrases):
+            return True
+
+        # Use word boundaries to avoid false positives like matching "it" in "list".
+        if bool(re.search(r"\b(this|that|these|those|it|they|them)\b", normalized)):
+            return True
+
+        # Very short questions (≤6 words) when there is prior history are almost always follow-ups.
+        if self.chat_history and len(normalized.split()) <= 6:
+            return True
+
+        return False
+
+    def _is_table_format_follow_up(self, question: str) -> bool:
+        """Return True if the user is asking to reformat the previous answer as a table
+        (e.g. 'show in table format', 'display as a table').
+        """
+        normalized = question.lower().strip()
+        format_phrases = [
+            "table format",
+            "in table",
+            "as a table",
+            "show in table",
+            "format this",
+            "format it",
+            "show me the list in table",
+            "display in table",
+            "tabular format",
+        ]
+        return any(phrase in normalized for phrase in format_phrases)
+
+    def _get_last_database_answer(self) -> str:
+        """Return the most recent answer that came from a database query,
+        or an empty string if no database turn exists in the history.
+        Used to reformat previous results without re-querying the database.
+        """
+        for turn in reversed(self.chat_history):
+            if turn.get("mode") == "database":
+                return turn.get("answer", "")
+        return ""
+
+    def _convert_text_list_to_markdown_table(self, text: str) -> str:
+        """Convert simple line/bullet/number lists into a markdown table."""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        items: list[str] = []
+        bullet_pattern = re.compile(r"^(?:[-*•]|\d+\.)\s+(.+)$")
+
+        # Case 1: explicit bullet or numbered list.
+        for line in lines:
+            match = bullet_pattern.match(line)
+            if match:
+                items.append(match.group(1).strip())
+
+        # Case 2: header line followed by plain list items.
+        if not items and len(lines) > 1 and lines[0].endswith(":"):
+            trailing = [line for line in lines[1:] if not line.endswith(":")]
+            if trailing:
+                items.extend(trailing)
+
+        if not items:
+            return ""
+
+        table_lines = ["| Value |", "| --- |"]
+        for item in items:
+            safe_item = item.replace("|", "\\|")
+            table_lines.append(f"| {safe_item} |")
+        return "\n".join(table_lines)
+
+    def _looks_like_markdown_table(self, text: str) -> bool:
+        """Return True if the text already contains a markdown table
+        (a header row followed by a separator row beginning with '|' and '-').
+        """
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return False
+        for i in range(len(lines) - 1):
+            header = lines[i]
+            separator = lines[i + 1]
+            if (
+                header.startswith("|")
+                and separator.startswith("|")
+                and "-" in separator
+            ):
+                return True
+        return False
+
+    def _convert_pipe_rows_to_markdown_table(self, text: str) -> str:
+        """Convert raw pipe-delimited rows into a markdown table with generic columns."""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        row_values: list[list[str]] = []
+        for line in lines:
+            if not (line.startswith("|") and line.endswith("|")):
+                continue
+            if line.count("|") < 3:
+                continue
+            cells = [cell.strip() for cell in line[1:-1].split("|")]
+            cells = [cell for cell in cells if cell]
+            if len(cells) < 2:
+                continue
+            row_values.append(cells)
+
+        if not row_values:
+            return ""
+
+        column_count = max(len(row) for row in row_values)
+        headers = [f"Column {idx + 1}" for idx in range(column_count)]
+        table_lines = [
+            "| " + " | ".join(headers) + " |",
+            "| " + " | ".join(["---"] * column_count) + " |",
+        ]
+
+        for row in row_values:
+            padded = row + [""] * (column_count - len(row))
+            escaped = [value.replace("|", "\\|") for value in padded]
+            table_lines.append("| " + " | ".join(escaped) + " |")
+
+        return "\n".join(table_lines)
+
+    def _convert_key_value_lines_to_markdown_table(self, text: str) -> str:
+        """Convert "Field: Value" lines into a two-column markdown table."""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        rows: list[tuple[str, str]] = []
+        for line in lines:
+            # Skip markdown-table-like rows; these should be handled separately.
+            if "|" in line:
+                continue
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key or not value:
+                continue
+            rows.append((key, value))
+
+        # Require multiple rows to avoid turning incidental single-colon text into Field/Value tables.
+        if len(rows) < 2:
+            return ""
+
+        table_lines = ["| Field | Value |", "| --- | --- |"]
+        for key, value in rows:
+            safe_key = key.replace("|", "\\|")
+            safe_value = value.replace("|", "\\|")
+            table_lines.append(f"| {safe_key} | {safe_value} |")
+        return "\n".join(table_lines)
+
+    def _to_markdown_table(self, text: str) -> str:
+        """Try converting text to a markdown table using known patterns."""
+        if self._looks_like_markdown_table(text):
+            return text
+
+        pipe_rows_table = self._convert_pipe_rows_to_markdown_table(text)
+        if pipe_rows_table:
+            return pipe_rows_table
+
+        key_value_table = self._convert_key_value_lines_to_markdown_table(text)
+        if key_value_table:
+            return key_value_table
+        return self._convert_text_list_to_markdown_table(text)
+
+    def _build_table_format_prompt(self, question: str, last_answer: str) -> str:
+        """Build an LLM prompt that instructs the model to convert a previous
+        database answer into a clean markdown table without re-running any query.
+        """
+        return (
+            "You are formatting the assistant's PREVIOUS database answer. "
+            "Do not run a new query and do not list database tables or schema. "
+            "Convert the previous answer into a clean markdown table. "
+            "If the previous answer has no structured rows, preserve the values as faithfully as possible and "
+            "still present them in a table. Keep it concise.\n\n"
+            f"User follow-up request: {question}\n\n"
+            f"Previous database answer:\n{last_answer}"
+        )
 
     def _remember_interaction(self, mode: str, question: str, answer: str) -> None:
+        """Append a completed question/answer turn to chat_history.
+        mode is either 'database' or 'general' and is used later to locate
+        the last database answer for table-format follow-ups.
+        Trims the history to max_history_turns to prevent unbounded memory growth.
+        """
         self.chat_history.append(
             {
                 "mode": mode,
@@ -229,9 +607,13 @@ class SqlAgentApp:
         )
         # Keep only recent turns to avoid unbounded context growth.
         if len(self.chat_history) > self.max_history_turns:
-            self.chat_history = self.chat_history[-self.max_history_turns:]
+            self.chat_history = self.chat_history[-self.max_history_turns :]
 
     def _format_context_history(self) -> str:
+        """Return a human-readable summary of the current chat history,
+        used by the 'show context' CLI command. Each turn is truncated to
+        120 characters for readability.
+        """
         if not self.chat_history:
             return "Context is empty."
 
@@ -251,6 +633,10 @@ class SqlAgentApp:
         return "\n".join(lines)
 
     def _build_follow_up_prompt(self, question: str) -> str:
+        """Build a general-purpose follow-up prompt that embeds the last 3
+        conversation turns so the LLM can resolve pronouns and references
+        without querying the database.
+        """
         recent_turns = self.chat_history[-3:]
         context_lines = []
         for turn in recent_turns:
@@ -265,17 +651,52 @@ class SqlAgentApp:
             f"Current follow-up question: {question}"
         )
 
+    def _build_database_follow_up_prompt(self, question: str) -> str:
+        """Build a context-aware prompt for database follow-up questions."""
+        recent_turns = self.chat_history[-3:]
+        context_lines = ["Previous conversation context:"]
+        for turn in recent_turns:
+            context_lines.append(f"User: {turn['question']}")
+            context_lines.append(f"Assistant: {turn['answer']}")
+
+        context_block = "\n".join(context_lines)
+        return (
+            f"{context_block}\n\n"
+            "Use this context to understand what the current question refers to. "
+            "Only query database objects when necessary to answer the follow-up. "
+            f"Current question: {question}"
+        )
+
     def _ask_general(self, question: str) -> str:
+        """Send a question directly to the general-purpose LLM (bypassing the
+        SQL agent) and return the response content as a plain string.
+        Used for non-database questions and follow-ups that don't need new data.
+        """
         response = self.general_llm.invoke(question)
         content = getattr(response, "content", "")
         return content if isinstance(content, str) else str(content)
 
-    def _execute_select_query(self, sql_query: str) -> tuple[list[str], list[dict[str, object]]]:
+    def _execute_select_query(
+        self, sql_query: str
+    ) -> tuple[list[str], list[dict[str, object]]]:
+        """Execute a raw SELECT query directly against the database engine and
+        return (column_names, rows). Raises ValueError if the query is empty,
+        does not start with SELECT, or contains a blocked SQL command.
+        Used by export_query_to_csv; bypasses the agent but still enforces
+        the keyword guard via _validate_sql.
+        """
         normalized = sql_query.strip().lower()
         if not normalized:
             raise ValueError("Please provide a SQL SELECT query.")
         if not normalized.startswith("select"):
             raise ValueError("Only SELECT queries can be exported.")
+        error = self._validate_sql(sql_query)
+        if error:
+            raise ValueError(error)
+        allowed_tables_error = self._validate_allowed_tables(sql_query)
+        if allowed_tables_error:
+            raise ValueError(allowed_tables_error)
+        self._validate_export_query(sql_query)
 
         engine = self.db._engine
         with engine.connect() as connection:
@@ -285,18 +706,49 @@ class SqlAgentApp:
         return columns, rows
 
     def ask(self, question: str) -> str:
+        """Main entry point for a single user question.
+        Routing logic (in order):
+        1. Table-format follow-up → reformat the last database answer without re-querying.
+        2. Non-database question → answer via the general LLM (with context if follow-up).
+        3. Database question → route through the LangChain SQL agent.
+        Stores every turn in chat_history and handles the 'result too large' error gracefully.
+        """
+        if self.chat_history and self._is_table_format_follow_up(question):
+            last_db_answer = self._get_last_database_answer()
+            if last_db_answer:
+                converted = self._to_markdown_table(last_db_answer)
+                if converted:
+                    answer = converted
+                else:
+                    answer = self._ask_general(
+                        self._build_table_format_prompt(question, last_db_answer)
+                    )
+                self._remember_interaction("general", question, answer)
+                return answer
+
         if not self._is_database_question(question):
             if self.chat_history and self._is_follow_up_question(question):
-                answer = self._ask_general(
-                    self._build_follow_up_prompt(question))
+                answer = self._ask_general(self._build_follow_up_prompt(question))
             else:
                 answer = self._ask_general(question)
             self._remember_interaction("general", question, answer)
             return answer
 
         try:
-            result = self.agent.invoke(question)
+            # For database follow-up questions, include conversation context
+            question_to_ask = question
+            if self.chat_history and self._is_follow_up_question(question):
+                question_to_ask = self._build_database_follow_up_prompt(question)
+
+            result = self.agent.invoke(question_to_ask)
             answer = result["output"]
+
+            # If user explicitly asked for table format, normalize the answer into markdown table.
+            if self._is_table_format_follow_up(question):
+                converted_answer = self._to_markdown_table(answer)
+                if converted_answer:
+                    answer = converted_answer
+
             self._remember_interaction("database", question, answer)
             return answer
         except Exception as e:
@@ -360,13 +812,26 @@ class SqlAgentApp:
             return f"Export failed: {e}"
 
     def run(self) -> None:
+        """Run the app as an interactive CLI REPL.
+        Supports special commands: 'exit', 'show context', 'reset context',
+        'remember N', 'export csv <SQL>', 'graph bar', 'graph pie', and
+        natural-language chart requests (e.g. 'plot earthquake counts').
+        All other input is forwarded to ask().
+        """
         print("SQL Agent is ready. Type 'exit' to quit.")
-        print("Special commands: 'graph bar' or 'graph pie' to visualize earthquakes by country.\n")
+        print(
+            "Special commands: 'graph bar' or 'graph pie' to visualize earthquakes by country.\n"
+        )
         print("Context commands: 'show context', 'reset context', 'remember N'.\n")
         print("Export command: export csv SELECT TOP 10 * FROM your_table\n")
 
         while True:
-            question = input("Ask a question (database or general): ").strip()
+            try:
+                question = input("Ask a question (database or general): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                break
+
             if question.lower() == "exit":
                 print("Goodbye!")
                 break
@@ -386,7 +851,7 @@ class SqlAgentApp:
                 continue
 
             if normalized.startswith("export csv "):
-                sql_query = question[len("export csv "):].strip()
+                sql_query = question[len("export csv ") :].strip()
                 print(f"\n{self.export_query_to_csv(sql_query)}\n")
                 continue
 
@@ -395,11 +860,12 @@ class SqlAgentApp:
                     max_turns = int(normalized.split()[1])
                     if max_turns <= 0:
                         print(
-                            "\nPlease provide a positive number, for example: remember 8\n")
+                            "\nPlease provide a positive number, for example: remember 8\n"
+                        )
                         continue
                     self.max_history_turns = max_turns
                     if len(self.chat_history) > self.max_history_turns:
-                        self.chat_history = self.chat_history[-self.max_history_turns:]
+                        self.chat_history = self.chat_history[-self.max_history_turns :]
                     print(
                         f"\nContext memory size set to {self.max_history_turns} turns.\n"
                     )
@@ -411,9 +877,7 @@ class SqlAgentApp:
             # Example: "Generate a pie chart of earthquake counts by country"
             is_chart_request = any(
                 token in normalized for token in ["graph", "chart", "plot", "visualize"]
-            ) and any(
-                token in normalized for token in ["earthquake", "earthquakes"]
-            )
+            ) and any(token in normalized for token in ["earthquake", "earthquakes"])
 
             if normalized.startswith("graph") or is_chart_request:
                 try:
@@ -428,9 +892,7 @@ class SqlAgentApp:
                     else:
                         # Default to bar chart for generic chart requests.
                         path = self.generate_earthquake_bar_chart()
-                        print(
-                            f"\nGenerated bar chart (default) saved to: {path}\n"
-                        )
+                        print(f"\nGenerated bar chart (default) saved to: {path}\n")
                 except Exception as e:
                     print(f"Error generating graph: {e}\n")
                 continue
