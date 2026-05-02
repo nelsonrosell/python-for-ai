@@ -1,6 +1,7 @@
 import argparse
 
 from app import SqlAgentApp
+from app.logging_utils import configure_logging
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -16,6 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    configure_logging()
     parser = _build_parser()
     args = parser.parse_args()
 

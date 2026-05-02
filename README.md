@@ -204,3 +204,46 @@ A VS Code task named `Run unittest suite` is available and runs:
 ```
 
 You can run it from `Terminal: Run Task` in VS Code.
+
+For local development, copy `.env.example` to `.env.dev` and fill in your own values.
+
+```env
+# ===== DEV ENVIRONMENT =====
+
+# Working local development configuration copied from .env.
+
+APP_ENV=dev
+APP_LOG_LEVEL=WARNING
+APP_LOG_FILE=logs/app.log
+APP_LOG_MAX_BYTES=1048576
+APP_LOG_BACKUP_COUNT=5
+AZURE_OPENAI_API_KEY=replace-with-your-key
+AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-02-01
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+SQL_CONNECTION_STRING=Driver={ODBC Driver 18 for SQL Server};Server=tcp:your-server.datawarehouse.fabric.microsoft.com,1433;Database=your_database;Encrypt=yes;TrustServerCertificate=no;
+SQL_USE_ACCESS_TOKEN_AUTH=true
+SQL_ENTRA_LOGIN_HINT=your-email@yourdomain.com
+
+# Dev-only explicit opt-in for local anonymous access.
+
+APP_ALLOW_ANONYMOUS_DEV_AUTH=true
+
+# Optional: set a password to protect the Streamlit UI (leave blank when using anonymous dev access)
+
+APP_PASSWORD=
+
+# Optional trusted-header auth for local reverse-proxy setups.
+```
+
+# Dev test profile enabled: expect a proxy or test client to send:
+
+# X-Forwarded-Authenticated: true
+
+# X-Authenticated-User: your-name@example.com
+
+# If those headers are not present, anonymous access now depends on APP_ALLOW_ANONYMOUS_DEV_AUTH=true.
+
+APP_TRUSTED_AUTH_HEADER=X-Forwarded-Authenticated
+APP_TRUSTED_AUTH_VALUE=true
+APP_TRUSTED_USER_HEADER=X-Authenticated-User

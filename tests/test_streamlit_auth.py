@@ -3,7 +3,9 @@ import unittest
 from unittest.mock import patch
 
 from streamlit_app import (
+    AUTH_SESSION_KEYS,
     _check_trusted_header_auth,
+    _get_generic_prompt_error_message,
     _get_header_value,
     _get_password_lock_state,
     _is_anonymous_dev_auth_allowed,
@@ -81,6 +83,10 @@ class TestStreamlitAuth(unittest.TestCase):
     )
     def test_anonymous_dev_auth_can_be_explicitly_enabled(self) -> None:
         self.assertTrue(_is_anonymous_dev_auth_allowed())
+
+    def test_auth_session_keys_clear_login_fields(self) -> None:
+        self.assertIn("login_name", AUTH_SESSION_KEYS)
+        self.assertIn("login_password", AUTH_SESSION_KEYS)
 
     @patch.dict(
         os.environ,
@@ -162,6 +168,12 @@ class TestStreamlitAuth(unittest.TestCase):
     )
     def test_trusted_header_config_allows_legacy_dev_setup(self) -> None:
         self.assertEqual(_validate_trusted_header_auth_config("dev"), "")
+
+    def test_generic_prompt_error_message_hides_internal_details(self) -> None:
+        self.assertEqual(
+            _get_generic_prompt_error_message(),
+            "Sorry, something went wrong while processing your request. Please try again.",
+        )
 
 
 if __name__ == "__main__":
