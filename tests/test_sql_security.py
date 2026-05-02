@@ -98,6 +98,14 @@ class TestSqlSecurity(unittest.TestCase):
             "Export queries must begin with SELECT TOP (n), where n <= 500.",
         )
 
+    def test_validate_export_query_allows_parenthesized_top_clause(self) -> None:
+        app = object.__new__(SqlAgentApp)
+        app.config = type("Config", (), {"max_export_rows": 500})()
+
+        app._validate_export_query(
+            "SELECT TOP (10) id FROM earthquake_events_gold ORDER BY id DESC"
+        )
+
     def test_validate_export_query_enforces_max_rows(self) -> None:
         app = object.__new__(SqlAgentApp)
         app.config = type("Config", (), {"max_export_rows": 25})()
