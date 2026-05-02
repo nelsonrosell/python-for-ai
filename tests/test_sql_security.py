@@ -7,28 +7,33 @@ from app.sql_agent_app import SqlAgentApp
 class TestSqlSecurity(unittest.TestCase):
     def test_validate_sql_allows_simple_select(self) -> None:
         self.assertIsNone(
-            SqlAgentApp._validate_sql("SELECT TOP 5 * FROM earthquake_events_gold")
+            SqlAgentApp._validate_sql(
+                "SELECT TOP 5 * FROM earthquake_events_gold")
         )
 
     def test_validate_sql_blocks_stacked_statements(self) -> None:
         error = SqlAgentApp._validate_sql("SELECT 1; DROP TABLE dangerous")
-        self.assertEqual(error, "Blocked: multiple SQL statements are not permitted.")
+        self.assertEqual(
+            error, "Blocked: multiple SQL statements are not permitted.")
 
     def test_validate_sql_blocks_select_into(self) -> None:
         error = SqlAgentApp._validate_sql(
             "SELECT * INTO audit_copy FROM earthquake_events_gold"
         )
-        self.assertEqual(error, "Blocked: 'SELECT INTO' statements are not permitted.")
+        self.assertEqual(
+            error, "Blocked: 'SELECT INTO' statements are not permitted.")
 
     def test_validate_allowed_tables_blocks_non_allowlisted_reference(self) -> None:
         app = object.__new__(SqlAgentApp)
         app.config = type(
             "Config",
             (),
-            {"sql_allowed_tables": ("earthquake_events_gold",), "max_export_rows": 500},
+            {"sql_allowed_tables": (
+                "earthquake_events_gold",), "max_export_rows": 500},
         )()
 
-        error = app._validate_allowed_tables("SELECT TOP 5 * FROM dbo.secret_table")
+        error = app._validate_allowed_tables(
+            "SELECT TOP 5 * FROM dbo.secret_table")
         self.assertEqual(
             error,
             "Blocked: query references non-allowlisted tables: secret_table.",
@@ -39,13 +44,46 @@ class TestSqlSecurity(unittest.TestCase):
         app.config = type(
             "Config",
             (),
-            {"sql_allowed_tables": ("earthquake_events_gold",), "max_export_rows": 500},
+            {"sql_allowed_tables": (
+                "earthquake_events_gold",), "max_export_rows": 500},
         )()
 
         self.assertIsNone(
             app._validate_allowed_tables(
                 "SELECT TOP 5 * FROM dbo.earthquake_events_gold"
             )
+        )
+
+    def test_validate_allowed_tables_allows_cte_reference(self) -> None:
+        app = object.__new__(SqlAgentApp)
+        app.config = type(
+            "Config",
+            (),
+            {"sql_allowed_tables": (
+                "earthquake_events_gold",), "max_export_rows": 500},
+        )()
+
+        self.assertIsNone(
+            app._validate_allowed_tables(
+                "WITH recent AS (SELECT TOP 5 * FROM dbo.earthquake_events_gold) SELECT * FROM recent"
+            )
+        )
+
+    def test_validate_allowed_tables_blocks_non_allowlisted_apply_source(self) -> None:
+        app = object.__new__(SqlAgentApp)
+        app.config = type(
+            "Config",
+            (),
+            {"sql_allowed_tables": (
+                "earthquake_events_gold",), "max_export_rows": 500},
+        )()
+
+        error = app._validate_allowed_tables(
+            "SELECT TOP 5 * FROM dbo.earthquake_events_gold CROSS APPLY dbo.secret_table_valued_fn"
+        )
+        self.assertEqual(
+            error,
+            "Blocked: query references non-allowlisted tables: secret_table_valued_fn.",
         )
 
     def test_validate_export_query_requires_top_clause(self) -> None:
@@ -65,7 +103,8 @@ class TestSqlSecurity(unittest.TestCase):
         app.config = type("Config", (), {"max_export_rows": 25})()
 
         with self.assertRaises(ValueError) as ctx:
-            app._validate_export_query("SELECT TOP 50 * FROM earthquake_events_gold")
+            app._validate_export_query(
+                "SELECT TOP 50 * FROM earthquake_events_gold")
 
         self.assertEqual(
             str(ctx.exception),
@@ -116,7 +155,8 @@ class TestSqlSecurity(unittest.TestCase):
 
         app.run()
 
-        mocked_input.assert_called_once_with("Ask a question (database or general): ")
+        mocked_input.assert_called_once_with(
+            "Ask a question (database or general): ")
         mocked_print.assert_any_call("\nGoodbye!")
 
 

@@ -1,4 +1,5 @@
 import struct
+import logging
 import re
 import warnings
 from urllib.parse import quote_plus
@@ -23,6 +24,7 @@ from .visualization import EarthquakeVisualizer
 SQL_ACCESS_TOKEN_ATTRIBUTE = 1256
 SQL_ACCESS_TOKEN_SCOPE = "https://database.windows.net/.default"
 DEFAULT_MAX_EXPORT_ROWS = 500
+LOGGER = logging.getLogger(__name__)
 warnings.filterwarnings(
     "ignore",
     message=r"response_mode='form_post' is recommended for better security\..*",
@@ -30,7 +32,8 @@ warnings.filterwarnings(
     module=r"msal\.oauth2cli\.oauth2",
 )
 _TABLE_REFERENCE_PATTERN = re.compile(
-    r'\b(?:FROM|JOIN)\s+([A-Za-z0-9_\.\[\]"]+)', re.IGNORECASE
+    r'\b(?:FROM|JOIN|APPLY|CROSS\s+APPLY|OUTER\s+APPLY)\s+([A-Za-z0-9_\.\[\]"]+)',
+    re.IGNORECASE,
 )
 _CTE_PATTERN = re.compile(r"\bWITH\s+([A-Za-z0-9_]+)\s+AS\b", re.IGNORECASE)
 SQL_AGENT_PREFIX = """
@@ -188,8 +191,10 @@ class SqlAgentApp:
         include_tables = list(self.config.sql_allowed_tables) or None
 
         if self.config.sql_use_access_token_auth:
-            odbc_connect = quote_plus(self._build_token_ready_connection_string())
-            engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
+            odbc_connect = quote_plus(
+                self._build_token_ready_connection_string())
+            engine = create_engine(
+                f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
             credential = self._create_token_credential()
 
             @event.listens_for(engine, "do_connect")
@@ -219,7 +224,8 @@ class SqlAgentApp:
         r"\b(DELETE|UPDATE|INSERT|MERGE|DROP|ALTER|CREATE|TRUNCATE|EXEC(UTE)?)\b",
         re.IGNORECASE,
     )
-    _SELECT_INTO_PATTERN = re.compile(r"\bSELECT\b[\s\S]*\bINTO\b", re.IGNORECASE)
+    _SELECT_INTO_PATTERN = re.compile(
+        r"\bSELECT\b[\s\S]*\bINTO\b", re.IGNORECASE)
     _EXPORT_TOP_PATTERN = re.compile(
         r"^\s*SELECT\s+(?:DISTINCT\s+)?TOP\s*(?:\(\s*(\d+)\s*\)|(\d+))\b",
         re.IGNORECASE,
@@ -253,7 +259,8 @@ class SqlAgentApp:
     @staticmethod
     def _normalize_table_identifier(identifier: str) -> str:
         cleaned = identifier.strip().strip(",")
-        parts = [part.strip('[]"') for part in cleaned.split(".") if part.strip()]
+        parts = [part.strip('[]"')
+                 for part in cleaned.split(".") if part.strip()]
         if not parts:
             return ""
         return parts[-1].lower()
@@ -607,7 +614,7 @@ class SqlAgentApp:
         )
         # Keep only recent turns to avoid unbounded context growth.
         if len(self.chat_history) > self.max_history_turns:
-            self.chat_history = self.chat_history[-self.max_history_turns :]
+            self.chat_history = self.chat_history[-self.max_history_turns:]
 
     def _format_context_history(self) -> str:
         """Return a human-readable summary of the current chat history,
@@ -721,14 +728,16 @@ class SqlAgentApp:
                     answer = converted
                 else:
                     answer = self._ask_general(
-                        self._build_table_format_prompt(question, last_db_answer)
+                        self._build_table_format_prompt(
+                            question, last_db_answer)
                     )
                 self._remember_interaction("general", question, answer)
                 return answer
 
         if not self._is_database_question(question):
             if self.chat_history and self._is_follow_up_question(question):
-                answer = self._ask_general(self._build_follow_up_prompt(question))
+                answer = self._ask_general(
+                    self._build_follow_up_prompt(question))
             else:
                 answer = self._ask_general(question)
             self._remember_interaction("general", question, answer)
@@ -738,7 +747,8 @@ class SqlAgentApp:
             # For database follow-up questions, include conversation context
             question_to_ask = question
             if self.chat_history and self._is_follow_up_question(question):
-                question_to_ask = self._build_database_follow_up_prompt(question)
+                question_to_ask = self._build_database_follow_up_prompt(
+                    question)
 
             result = self.agent.invoke(question_to_ask)
             answer = result["output"]
@@ -775,7 +785,7 @@ class SqlAgentApp:
                 result = connection.execute(query)
                 return {row[0]: row[1] for row in result}
         except Exception as e:
-            print(f"Error querying earthquake data: {e}")
+            LOGGER.exception("Error querying earthquake data")
             return {}
 
     def generate_earthquake_bar_chart(self) -> str:
@@ -809,7 +819,8 @@ class SqlAgentApp:
         except ValueError as e:
             return str(e)
         except Exception as e:
-            return f"Export failed: {e}"
+            LOGGER.exception("Export query failed")
+            return "Export failed. Please try again later."
 
     def run(self) -> None:
         """Run the app as an interactive CLI REPL.
@@ -827,7 +838,8 @@ class SqlAgentApp:
 
         while True:
             try:
-                question = input("Ask a question (database or general): ").strip()
+                question = input(
+                    "Ask a question (database or general): ").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nGoodbye!")
                 break
@@ -851,7 +863,7 @@ class SqlAgentApp:
                 continue
 
             if normalized.startswith("export csv "):
-                sql_query = question[len("export csv ") :].strip()
+                sql_query = question[len("export csv "):].strip()
                 print(f"\n{self.export_query_to_csv(sql_query)}\n")
                 continue
 
@@ -865,7 +877,7 @@ class SqlAgentApp:
                         continue
                     self.max_history_turns = max_turns
                     if len(self.chat_history) > self.max_history_turns:
-                        self.chat_history = self.chat_history[-self.max_history_turns :]
+                        self.chat_history = self.chat_history[-self.max_history_turns:]
                     print(
                         f"\nContext memory size set to {self.max_history_turns} turns.\n"
                     )
@@ -892,7 +904,8 @@ class SqlAgentApp:
                     else:
                         # Default to bar chart for generic chart requests.
                         path = self.generate_earthquake_bar_chart()
-                        print(f"\nGenerated bar chart (default) saved to: {path}\n")
+                        print(
+                            f"\nGenerated bar chart (default) saved to: {path}\n")
                 except Exception as e:
                     print(f"Error generating graph: {e}\n")
                 continue

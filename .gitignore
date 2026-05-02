@@ -48,6 +48,7 @@ htmlcov/
 .env.dev
 .env.test
 .env.prod
+logs/app.log*
 # Allow example/template files
 !.env.example
 !.env.*.example

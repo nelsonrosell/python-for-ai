@@ -1,5 +1,6 @@
 import os
 import hmac
+import logging
 import re
 import time
 from pathlib import Path
@@ -9,14 +10,22 @@ import streamlit as st
 
 from app import SqlAgentApp
 from app.env import load_environment
+from app.logging_utils import configure_logging
 
 
 CHATGPT_STYLE_PATH = Path(__file__).with_name("streamlit_app.css")
+LOG_FILE_PATH = configure_logging()
+LOGGER = logging.getLogger(__name__)
 AUTH_SESSION_KEYS = (
     "authenticated",
     "auth_provider",
     "auth_principal",
     "auth_last_verified_at",
+    "auth_error_message",
+    "password_attempt_count",
+    "password_locked_until",
+    "login_name",
+    "login_password",
 )
 
 # ---------------------------------------------------------------------------
@@ -86,6 +95,10 @@ def _get_ui_auth_principal() -> str:
     if auth_provider == "dev":
         return _get_dev_display_name()
     return ""
+
+
+def _get_generic_prompt_error_message() -> str:
+    return "Sorry, something went wrong while processing your request. Please try again."
 
 
 def _expire_auth_session_if_needed(now: float | None = None) -> None:
@@ -338,7 +351,8 @@ def _submit_prompt(app: SqlAgentApp, prompt: str) -> None:
         response_message = run_chat_turn(app, prompt)
         st.session_state.messages.append(response_message)
     except Exception as e:
-        error_text = f"Error: {e}"
+        LOGGER.exception("Prompt processing failed")
+        error_text = _get_generic_prompt_error_message()
         st.session_state.messages.append(
             {"role": "assistant", "content": error_text})
 
