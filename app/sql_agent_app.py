@@ -227,7 +227,7 @@ class SqlAgentApp:
     _SELECT_INTO_PATTERN = re.compile(
         r"\bSELECT\b[\s\S]*\bINTO\b", re.IGNORECASE)
     _EXPORT_TOP_PATTERN = re.compile(
-        r"^\s*SELECT\s+(?:DISTINCT\s+)?TOP\s*(?:\(\s*(\d+)\s*\)|(\d+))\b",
+        r"^\s*SELECT\s+(?:DISTINCT\s+)?TOP\s*(?:\(\s*(\d+)\s*\)|(\d+))(?=\s|$)",
         re.IGNORECASE,
     )
 
