@@ -42,6 +42,32 @@ Deployment checklist:
 - Keep `APP_MAX_EXPORT_ROWS` conservative for your data sensitivity.
 - Put Streamlit behind a reverse proxy or gateway that strips inbound auth headers from clients and injects the trusted headers itself.
 
+Email delivery:
+
+- The app can send the latest assistant result with a command such as `send this to alice@example.com` after a query result is shown.
+- Email delivery uses Microsoft Graph app-only auth when `GRAPH_MAIL_TENANT_ID`, `GRAPH_MAIL_CLIENT_ID`, `GRAPH_MAIL_CLIENT_SECRET`, and `GRAPH_MAIL_SENDER` are configured.
+- `GRAPH_MAIL_SENDER` should be a real mailbox or shared mailbox that the app registration is allowed to send as.
+
+## CI/CD
+
+GitHub Actions workflows are included for automated validation and optional deployment:
+
+- `.github/workflows/ci.yml` runs on pull requests and pushes to `main`, installs `requirements/dev.txt`, and runs `pytest tests -q`.
+- `.github/workflows/deploy.yml` reruns the same test suite on `main` and `workflow_dispatch`, then deploys the tracked repository contents to Azure App Service when the required GitHub configuration is present.
+
+To enable deployment, add these GitHub settings to the repository:
+
+- Repository variable: `AZURE_WEBAPP_NAME`
+- Repository secret: `AZURE_WEBAPP_PUBLISH_PROFILE`
+
+For an Azure Linux Web App running this Streamlit application, set the startup command to:
+
+```text
+python -m streamlit run streamlit_app.py --server.port 8000 --server.address 0.0.0.0
+```
+
+Also configure the app settings in Azure from the same values you would place in `.env.prod`. The deployment workflow intentionally skips the deploy step until both the variable and secret are configured, so `main` can stay green before the hosting target is ready.
+
 Local proxy helper:
 
 ```powershell
