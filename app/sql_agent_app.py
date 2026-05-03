@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import make_url
 
 from .config import AppConfig, load_config
+from .email_utils import GraphMailSender, build_email_attachment, build_result_email_html
 from .export import export_rows_to_csv
 from .visualization import EarthquakeVisualizer
 
@@ -36,6 +37,10 @@ _TABLE_REFERENCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _CTE_PATTERN = re.compile(r"\bWITH\s+([A-Za-z0-9_]+)\s+AS\b", re.IGNORECASE)
+_EMAIL_ADDRESS_PATTERN = re.compile(
+    r"(?P<recipient>[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
+    re.IGNORECASE,
+)
 SQL_AGENT_PREFIX = """
 You are an agent designed to interact with a Microsoft SQL Server-compatible database (Microsoft Fabric SQL endpoint).
 
@@ -601,7 +606,7 @@ class SqlAgentApp:
 
     def _remember_interaction(self, mode: str, question: str, answer: str) -> None:
         """Append a completed question/answer turn to chat_history.
-        mode is either 'database' or 'general' and is used later to locate
+        mode is either 'database', 'general', or 'email' and is used later to locate
         the last database answer for table-format follow-ups.
         Trims the history to max_history_turns to prevent unbounded memory growth.
         """
@@ -674,6 +679,106 @@ class SqlAgentApp:
             f"Current question: {question}"
         )
 
+    @staticmethod
+    def _parse_email_request(question: str) -> tuple[str, bool]:
+        normalized = question.strip().lower()
+        if not normalized:
+            return "", False
+        if "email" not in normalized and "send" not in normalized:
+            return "", False
+        match = _EMAIL_ADDRESS_PATTERN.search(question)
+        if not match:
+            return "", False
+        wants_attachment = bool(
+            re.search(
+                r"\b(?:as|with)\s+attachment\b|\battached\b|\battach(?:ment)?\b", normalized)
+        )
+        return match.group("recipient").strip(), wants_attachment
+
+    def _get_last_shareable_answer(self) -> tuple[str, str]:
+        for turn in reversed(self.chat_history):
+            if turn.get("mode") in {"database", "general"}:
+                return turn.get("question", ""), turn.get("answer", "")
+        return "", ""
+
+    def _get_formatted_email_answer(self, answer: str) -> str:
+        if self._looks_like_markdown_table(answer):
+            return answer
+
+        converted = self._to_markdown_table(answer)
+        return converted or answer
+
+    def _get_email_configuration_error(self) -> str:
+        required_settings = {
+            "GRAPH_MAIL_TENANT_ID": self.config.graph_mail_tenant_id,
+            "GRAPH_MAIL_CLIENT_ID": self.config.graph_mail_client_id,
+            "GRAPH_MAIL_CLIENT_SECRET": self.config.graph_mail_client_secret,
+            "GRAPH_MAIL_SENDER": self.config.graph_mail_sender,
+        }
+        missing_settings = [
+            setting_name
+            for setting_name, setting_value in required_settings.items()
+            if not setting_value
+        ]
+        if not missing_settings:
+            return ""
+        return (
+            "Email sending is not configured. Missing: "
+            + ", ".join(missing_settings)
+            + "."
+        )
+
+    def _build_email_subject(self, source_question: str) -> str:
+        normalized = " ".join(source_question.split()).strip()
+        if not normalized:
+            return "Earthquake Agent result"
+        if len(normalized) > 70:
+            normalized = normalized[:67] + "..."
+        return f"Earthquake Agent result: {normalized}"
+
+    def _send_last_answer_to_email(self, recipient: str, wants_attachment: bool = False) -> str:
+        source_question, source_answer = self._get_last_shareable_answer()
+        if not source_answer:
+            return "There is no previous result to email yet."
+
+        configuration_error = self._get_email_configuration_error()
+        if configuration_error:
+            return configuration_error
+
+        formatted_answer = self._get_formatted_email_answer(source_answer)
+        text_body = (
+            f"Source question: {source_question}\n\n"
+            f"{formatted_answer}"
+        )
+        html_body = build_result_email_html(source_question, formatted_answer)
+        attachment = build_email_attachment(
+            formatted_answer) if wants_attachment else None
+        sender = GraphMailSender(
+            tenant_id=self.config.graph_mail_tenant_id or "",
+            client_id=self.config.graph_mail_client_id or "",
+            client_secret=self.config.graph_mail_client_secret or "",
+            sender_user_id=self.config.graph_mail_sender or "",
+        )
+
+        try:
+            sender.send_mail(
+                recipient=recipient,
+                subject=self._build_email_subject(source_question),
+                html_body=html_body,
+                text_body=text_body,
+                attachment=attachment,
+            )
+        except RuntimeError as error:
+            LOGGER.exception("Email delivery failed")
+            return f"Email delivery failed: {error}"
+
+        confirmation = f"Sent the latest result to {recipient}."
+        if wants_attachment:
+            confirmation = f"Sent the latest result to {recipient} with an attachment."
+        self._remember_interaction(
+            "email", f"send this to {recipient}", confirmation)
+        return confirmation
+
     def _ask_general(self, question: str) -> str:
         """Send a question directly to the general-purpose LLM (bypassing the
         SQL agent) and return the response content as a plain string.
@@ -715,11 +820,16 @@ class SqlAgentApp:
     def ask(self, question: str) -> str:
         """Main entry point for a single user question.
         Routing logic (in order):
-        1. Table-format follow-up → reformat the last database answer without re-querying.
-        2. Non-database question → answer via the general LLM (with context if follow-up).
-        3. Database question → route through the LangChain SQL agent.
+        1. Email command → send the last shareable answer to the requested recipient.
+        2. Table-format follow-up → reformat the last database answer without re-querying.
+        3. Non-database question → answer via the general LLM (with context if follow-up).
+        4. Database question → route through the LangChain SQL agent.
         Stores every turn in chat_history and handles the 'result too large' error gracefully.
         """
+        recipient, wants_attachment = self._parse_email_request(question)
+        if recipient:
+            return self._send_last_answer_to_email(recipient, wants_attachment)
+
         if self.chat_history and self._is_table_format_follow_up(question):
             last_db_answer = self._get_last_database_answer()
             if last_db_answer:

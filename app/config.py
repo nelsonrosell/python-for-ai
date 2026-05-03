@@ -19,6 +19,10 @@ class AppConfig:
     azure_openai_deployment: str
     agent_verbose_logging: bool
     max_export_rows: int
+    graph_mail_tenant_id: str | None
+    graph_mail_client_id: str | None
+    graph_mail_client_secret: str | None
+    graph_mail_sender: str | None
 
 
 REQUIRED_KEYS = [
@@ -101,4 +105,8 @@ def load_config() -> AppConfig:
         azure_openai_deployment=os.environ["AZURE_OPENAI_DEPLOYMENT"],
         agent_verbose_logging=agent_verbose_logging,
         max_export_rows=_get_positive_int_env("APP_MAX_EXPORT_ROWS", 500),
+        graph_mail_tenant_id=os.getenv("GRAPH_MAIL_TENANT_ID") or None,
+        graph_mail_client_id=os.getenv("GRAPH_MAIL_CLIENT_ID") or None,
+        graph_mail_client_secret=os.getenv("GRAPH_MAIL_CLIENT_SECRET") or None,
+        graph_mail_sender=os.getenv("GRAPH_MAIL_SENDER") or None,
     )
