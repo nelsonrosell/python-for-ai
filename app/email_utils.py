@@ -107,16 +107,28 @@ def _markdown_table_rows(markdown_table: str) -> tuple[list[str], list[list[str]
     return headers, rows
 
 
-def build_email_attachment(formatted_answer: str) -> tuple[str, str, str]:
+def _build_csv_attachment_from_rows(headers: list[str], rows: list[list[str]]) -> tuple[str, str, str]:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    encoded = base64.b64encode(output.getvalue().encode("utf-8")).decode("ascii")
+    return ("earthquake_result.csv", "text/csv", encoded)
+
+
+def _build_csv_attachment_from_text(formatted_answer: str) -> tuple[str, str, str]:
+    lines = [line.strip() for line in formatted_answer.splitlines() if line.strip()]
+    rows = [[line] for line in lines] if lines else [[formatted_answer.strip()]]
+    return _build_csv_attachment_from_rows(["Value"], rows)
+
+
+def build_email_attachment(formatted_answer: str, attachment_format: str | None = None) -> tuple[str, str, str]:
     headers, rows = _markdown_table_rows(formatted_answer)
     if headers and rows:
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(headers)
-        writer.writerows(rows)
-        encoded = base64.b64encode(
-            output.getvalue().encode("utf-8")).decode("ascii")
-        return ("earthquake_result.csv", "text/csv", encoded)
+        return _build_csv_attachment_from_rows(headers, rows)
+
+    if attachment_format == "csv":
+        return _build_csv_attachment_from_text(formatted_answer)
 
     encoded = base64.b64encode(
         formatted_answer.encode("utf-8")).decode("ascii")
