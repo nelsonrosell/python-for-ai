@@ -26,9 +26,32 @@ def _split_markdown_row(line: str) -> list[str]:
     return [value for value in values]
 
 
+def _extract_markdown_table_lines(text: str) -> list[str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return []
+
+    for index in range(len(lines) - 1):
+        headers = _split_markdown_row(lines[index])
+        separators = _split_markdown_row(lines[index + 1])
+        if not headers or not separators or len(headers) != len(separators):
+            continue
+        if not all(set(cell) <= {":", "-", " "} for cell in separators):
+            continue
+
+        table_lines = [lines[index], lines[index + 1]]
+        for line in lines[index + 2:]:
+            row = _split_markdown_row(line)
+            if not row:
+                break
+            table_lines.append(line)
+        return table_lines
+
+    return []
+
+
 def markdown_table_to_html(markdown_table: str) -> str:
-    lines = [line.strip()
-             for line in markdown_table.splitlines() if line.strip()]
+    lines = _extract_markdown_table_lines(markdown_table)
     if len(lines) < 2:
         return ""
 
@@ -84,8 +107,7 @@ def build_result_email_html(source_question: str, formatted_answer: str) -> str:
 
 
 def _markdown_table_rows(markdown_table: str) -> tuple[list[str], list[list[str]]]:
-    lines = [line.strip()
-             for line in markdown_table.splitlines() if line.strip()]
+    lines = _extract_markdown_table_lines(markdown_table)
     if len(lines) < 2:
         return [], []
 

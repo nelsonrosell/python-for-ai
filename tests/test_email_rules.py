@@ -77,6 +77,25 @@ class TestEmailRules(unittest.TestCase):
         self.assertEqual(content_type, "text/csv")
         self.assertTrue(content_bytes)
 
+    def test_build_email_payload_extracts_table_from_mixed_content_for_csv(self) -> None:
+        payload = build_email_payload(
+            "show quakes",
+            "Here are the latest earthquakes in Australia:\n"
+            "| ID | Title | Magnitude |\n"
+            "| --- | --- | --- |\n"
+            "| us6000qj0l | M 5.5 | 5.5 |\n"
+            "| us6000qj0h | M 5.9 | 5.9 |\n"
+            "It seems there are duplicate entries.",
+            True,
+            "csv",
+        )
+        attachment = payload["attachment"]
+        self.assertIsNotNone(attachment)
+        attachment_name, content_type, content_bytes = attachment  # type: ignore[misc]
+        self.assertEqual(attachment_name, "earthquake_result.csv")
+        self.assertEqual(content_type, "text/csv")
+        self.assertIn("SUQsVGl0bGUsTWFnbml0dWRl", content_bytes)
+
 
 if __name__ == "__main__":
     unittest.main()
