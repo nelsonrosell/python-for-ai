@@ -1,6 +1,5 @@
 import struct
 import logging
-import re
 import warnings
 from urllib.parse import quote_plus
 from typing import Any
@@ -17,8 +16,32 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import make_url
 
 from .config import AppConfig, load_config
-from .email_utils import GraphMailSender, build_email_attachment, build_result_email_html
+from .email_rules import (
+    build_email_payload,
+    build_email_subject,
+    get_email_configuration_error,
+    get_last_shareable_answer,
+)
+from .email_utils import GraphMailSender
 from .export import export_rows_to_csv
+from .request_routing import (
+    is_database_question,
+    is_follow_up_question,
+    is_table_format_follow_up,
+    parse_email_request,
+)
+from .sql_agent_prompt import build_agent_prefix
+from .sql_guardrails import (
+    DEFAULT_MAX_EXPORT_ROWS,
+    validate_allowed_tables,
+    validate_export_query,
+    validate_query,
+    validate_sql,
+)
+from .table_formatting import (
+    build_table_format_prompt,
+    to_markdown_table,
+)
 from .visualization import EarthquakeVisualizer
 
 
@@ -32,33 +55,6 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"msal\.oauth2cli\.oauth2",
 )
-_TABLE_REFERENCE_PATTERN = re.compile(
-    r'\b(?:FROM|JOIN|APPLY|CROSS\s+APPLY|OUTER\s+APPLY)\s+([A-Za-z0-9_\.\[\]"]+)',
-    re.IGNORECASE,
-)
-_CTE_PATTERN = re.compile(r"\bWITH\s+([A-Za-z0-9_]+)\s+AS\b", re.IGNORECASE)
-_EMAIL_ADDRESS_PATTERN = re.compile(
-    r"(?P<recipient>[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
-    re.IGNORECASE,
-)
-SQL_AGENT_PREFIX = """
-You are an agent designed to interact with a Microsoft SQL Server-compatible database (Microsoft Fabric SQL endpoint).
-
-CRITICAL: Always keep result sets small and manageable:
-- Use TOP (n) with n <= 5 for data exploration queries.
-- For COUNT or aggregation queries, GROUP BY with limited results.
-- Never return raw table dumps; always aggregate or limit results.
-- If results are too large, use LIMIT or TOP to reduce output.
-
-When writing SQL:
-- Use SQL Server syntax.
-- Use TOP (n) instead of LIMIT.
-- Prefer explicit column lists over SELECT *.
-- Use square brackets for identifiers only when needed.
-- Never run INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, or EXEC.
-- If a query fails due to syntax, correct it for SQL Server and retry.
-- ALWAYS use TOP (5) for safety unless aggregating results.
-""".strip()
 
 
 class SqlAgentApp:
@@ -225,108 +221,8 @@ class SqlAgentApp:
         engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_connect}")
         return SQLDatabase(engine, include_tables=include_tables)
 
-    _BLOCKED_SQL_COMMANDS = re.compile(
-        r"\b(DELETE|UPDATE|INSERT|MERGE|DROP|ALTER|CREATE|TRUNCATE|EXEC(UTE)?)\b",
-        re.IGNORECASE,
-    )
-    _SELECT_INTO_PATTERN = re.compile(
-        r"\bSELECT\b[\s\S]*\bINTO\b", re.IGNORECASE)
-    _EXPORT_TOP_PATTERN = re.compile(
-        r"^\s*SELECT\s+(?:DISTINCT\s+)?TOP\s*(?:\(\s*(\d+)\s*\)|(\d+))(?=\s|$)",
-        re.IGNORECASE,
-    )
-
-    @classmethod
-    def _validate_sql(cls, query: str) -> str | None:
-        """Return an error string if the query contains a blocked command, else None."""
-        normalized = query.strip()
-        if not normalized:
-            return "Blocked: empty SQL statements are not permitted."
-
-        if any(token in normalized for token in ("--", "/*", "*/")):
-            return "Blocked: SQL comments are not permitted."
-
-        if ";" in normalized.rstrip().rstrip(";"):
-            return "Blocked: multiple SQL statements are not permitted."
-
-        match = cls._BLOCKED_SQL_COMMANDS.search(query)
-        if match:
-            return f"Blocked: '{match.group().upper()}' statements are not permitted."
-
-        if cls._SELECT_INTO_PATTERN.search(query):
-            return "Blocked: 'SELECT INTO' statements are not permitted."
-
-        return None
-
     def _get_max_export_rows(self) -> int:
         return getattr(self.config, "max_export_rows", DEFAULT_MAX_EXPORT_ROWS)
-
-    @staticmethod
-    def _normalize_table_identifier(identifier: str) -> str:
-        cleaned = identifier.strip().strip(",")
-        parts = [part.strip('[]"')
-                 for part in cleaned.split(".") if part.strip()]
-        if not parts:
-            return ""
-        return parts[-1].lower()
-
-    def _validate_allowed_tables(self, sql_query: str) -> str | None:
-        if not self.config.sql_allowed_tables:
-            return None
-
-        allowed_tables = {
-            self._normalize_table_identifier(table)
-            for table in self.config.sql_allowed_tables
-        }
-        cte_names = {
-            self._normalize_table_identifier(match.group(1))
-            for match in _CTE_PATTERN.finditer(sql_query)
-        }
-
-        referenced_tables = {
-            self._normalize_table_identifier(match.group(1))
-            for match in _TABLE_REFERENCE_PATTERN.finditer(sql_query)
-        }
-        referenced_tables = {table for table in referenced_tables if table}
-        disallowed_tables = sorted(
-            table
-            for table in referenced_tables
-            if table not in allowed_tables and table not in cte_names
-        )
-        if disallowed_tables:
-            formatted = ", ".join(disallowed_tables)
-            return f"Blocked: query references non-allowlisted tables: {formatted}."
-        return None
-
-    def _validate_query(self, sql_query: str) -> str | None:
-        error = self._validate_sql(sql_query)
-        if error:
-            return error
-        return self._validate_allowed_tables(sql_query)
-
-    def _build_agent_prefix(self) -> str:
-        prefix = SQL_AGENT_PREFIX
-        if self.config.sql_allowed_tables:
-            allowed = ", ".join(self.config.sql_allowed_tables)
-            prefix += (
-                "\n\nAllowed tables/views: "
-                f"{allowed}. Never query tables outside this allowlist."
-            )
-        return prefix
-
-    def _validate_export_query(self, sql_query: str) -> None:
-        top_match = self._EXPORT_TOP_PATTERN.match(sql_query)
-        max_export_rows = self._get_max_export_rows()
-        if not top_match:
-            raise ValueError(
-                f"Export queries must begin with SELECT TOP (n), where n <= {max_export_rows}."
-            )
-
-        row_limit = int(top_match.group(1) or top_match.group(2))
-        if row_limit > max_export_rows:
-            raise ValueError(
-                f"Export queries are limited to TOP ({max_export_rows}) rows."
-            )
 
     def _patch_db_with_guard(self) -> None:
         """Patch self.db.run() so the keyword guard applies to every execution path,
@@ -335,7 +231,7 @@ class SqlAgentApp:
 
         def guarded_run(command: str, *args: Any, **kwargs: Any) -> str:
             query_text = command if isinstance(command, str) else str(command)
-            error = self._validate_query(query_text)
+            error = validate_query(query_text, self.config.sql_allowed_tables)
             if error:
                 return error
             return original_run(command, *args, **kwargs)
@@ -350,107 +246,11 @@ class SqlAgentApp:
             db=self.db,
             verbose=self.config.agent_verbose_logging,
             agent_type="tool-calling",
-            prefix=self._build_agent_prefix(),
+            prefix=build_agent_prefix(self.config.sql_allowed_tables),
             top_k=3,
             max_iterations=5,
             agent_executor_kwargs={"handle_parsing_errors": True},
         )
-
-    def _is_database_question(self, question: str) -> bool:
-        """Return True if the question appears to be about the database.
-        Uses a keyword heuristic (earthquake domain terms, SQL keywords, etc.)
-        to decide whether to route through the SQL agent or the general LLM.
-        """
-        normalized = question.lower()
-        db_terms = [
-            "database",
-            "sql",
-            "table",
-            "query",
-            "schema",
-            "column",
-            "row",
-            "count",
-            "earthquake",
-            "country",
-            "state",
-            "county",
-            "filter",
-            "group by",
-            "order by",
-            "top",
-            "average",
-            "sum",
-            "max",
-            "min",
-        ]
-        return any(term in normalized for term in db_terms)
-
-    def _is_follow_up_question(self, question: str) -> bool:
-        """Return True if the question is a follow-up to a previous turn.
-        Detects follow-ups via known phrases ('what does this mean', 'how about'),
-        anaphoric pronouns ('this', 'they', 'them'), or short questions (≤ 6 words)
-        when chat history is non-empty.
-        """
-        normalized = question.lower().strip()
-        follow_up_phrases = [
-            "what does this",
-            "what do these",
-            "what does that mean",
-            "what are these",
-            "can you explain",
-            "same query",
-            "same result",
-            "same as above",
-            "previous result",
-            "above result",
-            "the list",
-            "this list",
-            "that list",
-            "these results",
-            "those results",
-            "how about",
-            "what about",
-            "and in",
-            "and for",
-            "what about",
-            "more about",
-            "tell me more",
-            "go on",
-            "and what",
-            "also in",
-            "also for",
-        ]
-        if any(phrase in normalized for phrase in follow_up_phrases):
-            return True
-
-        # Use word boundaries to avoid false positives like matching "it" in "list".
-        if bool(re.search(r"\b(this|that|these|those|it|they|them)\b", normalized)):
-            return True
-
-        # Very short questions (≤6 words) when there is prior history are almost always follow-ups.
-        if self.chat_history and len(normalized.split()) <= 6:
-            return True
-
-        return False
-
-    def _is_table_format_follow_up(self, question: str) -> bool:
-        """Return True if the user is asking to reformat the previous answer as a table
-        (e.g. 'show in table format', 'display as a table').
-        """
-        normalized = question.lower().strip()
-        format_phrases = [
-            "table format",
-            "in table",
-            "as a table",
-            "show in table",
-            "format this",
-            "format it",
-            "show me the list in table",
-            "display in table",
-            "tabular format",
-        ]
-        return any(phrase in normalized for phrase in format_phrases)
 
     def _get_last_database_answer(self) -> str:
         """Return the most recent answer that came from a database query,
@@ -461,148 +261,6 @@ class SqlAgentApp:
             if turn.get("mode") == "database":
                 return turn.get("answer", "")
         return ""
-
-    def _convert_text_list_to_markdown_table(self, text: str) -> str:
-        """Convert simple line/bullet/number lists into a markdown table."""
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if not lines:
-            return ""
-
-        items: list[str] = []
-        bullet_pattern = re.compile(r"^(?:[-*•]|\d+\.)\s+(.+)$")
-
-        # Case 1: explicit bullet or numbered list.
-        for line in lines:
-            match = bullet_pattern.match(line)
-            if match:
-                items.append(match.group(1).strip())
-
-        # Case 2: header line followed by plain list items.
-        if not items and len(lines) > 1 and lines[0].endswith(":"):
-            trailing = [line for line in lines[1:] if not line.endswith(":")]
-            if trailing:
-                items.extend(trailing)
-
-        if not items:
-            return ""
-
-        table_lines = ["| Value |", "| --- |"]
-        for item in items:
-            safe_item = item.replace("|", "\\|")
-            table_lines.append(f"| {safe_item} |")
-        return "\n".join(table_lines)
-
-    def _looks_like_markdown_table(self, text: str) -> bool:
-        """Return True if the text already contains a markdown table
-        (a header row followed by a separator row beginning with '|' and '-').
-        """
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if len(lines) < 2:
-            return False
-        for i in range(len(lines) - 1):
-            header = lines[i]
-            separator = lines[i + 1]
-            if (
-                header.startswith("|")
-                and separator.startswith("|")
-                and "-" in separator
-            ):
-                return True
-        return False
-
-    def _convert_pipe_rows_to_markdown_table(self, text: str) -> str:
-        """Convert raw pipe-delimited rows into a markdown table with generic columns."""
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if not lines:
-            return ""
-
-        row_values: list[list[str]] = []
-        for line in lines:
-            if not (line.startswith("|") and line.endswith("|")):
-                continue
-            if line.count("|") < 3:
-                continue
-            cells = [cell.strip() for cell in line[1:-1].split("|")]
-            cells = [cell for cell in cells if cell]
-            if len(cells) < 2:
-                continue
-            row_values.append(cells)
-
-        if not row_values:
-            return ""
-
-        column_count = max(len(row) for row in row_values)
-        headers = [f"Column {idx + 1}" for idx in range(column_count)]
-        table_lines = [
-            "| " + " | ".join(headers) + " |",
-            "| " + " | ".join(["---"] * column_count) + " |",
-        ]
-
-        for row in row_values:
-            padded = row + [""] * (column_count - len(row))
-            escaped = [value.replace("|", "\\|") for value in padded]
-            table_lines.append("| " + " | ".join(escaped) + " |")
-
-        return "\n".join(table_lines)
-
-    def _convert_key_value_lines_to_markdown_table(self, text: str) -> str:
-        """Convert "Field: Value" lines into a two-column markdown table."""
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if not lines:
-            return ""
-
-        rows: list[tuple[str, str]] = []
-        for line in lines:
-            # Skip markdown-table-like rows; these should be handled separately.
-            if "|" in line:
-                continue
-            if ":" not in line:
-                continue
-            key, value = line.split(":", 1)
-            key = key.strip()
-            value = value.strip()
-            if not key or not value:
-                continue
-            rows.append((key, value))
-
-        # Require multiple rows to avoid turning incidental single-colon text into Field/Value tables.
-        if len(rows) < 2:
-            return ""
-
-        table_lines = ["| Field | Value |", "| --- | --- |"]
-        for key, value in rows:
-            safe_key = key.replace("|", "\\|")
-            safe_value = value.replace("|", "\\|")
-            table_lines.append(f"| {safe_key} | {safe_value} |")
-        return "\n".join(table_lines)
-
-    def _to_markdown_table(self, text: str) -> str:
-        """Try converting text to a markdown table using known patterns."""
-        if self._looks_like_markdown_table(text):
-            return text
-
-        pipe_rows_table = self._convert_pipe_rows_to_markdown_table(text)
-        if pipe_rows_table:
-            return pipe_rows_table
-
-        key_value_table = self._convert_key_value_lines_to_markdown_table(text)
-        if key_value_table:
-            return key_value_table
-        return self._convert_text_list_to_markdown_table(text)
-
-    def _build_table_format_prompt(self, question: str, last_answer: str) -> str:
-        """Build an LLM prompt that instructs the model to convert a previous
-        database answer into a clean markdown table without re-running any query.
-        """
-        return (
-            "You are formatting the assistant's PREVIOUS database answer. "
-            "Do not run a new query and do not list database tables or schema. "
-            "Convert the previous answer into a clean markdown table. "
-            "If the previous answer has no structured rows, preserve the values as faithfully as possible and "
-            "still present them in a table. Keep it concise.\n\n"
-            f"User follow-up request: {question}\n\n"
-            f"Previous database answer:\n{last_answer}"
-        )
 
     def _remember_interaction(self, mode: str, question: str, answer: str) -> None:
         """Append a completed question/answer turn to chat_history.
@@ -679,80 +337,27 @@ class SqlAgentApp:
             f"Current question: {question}"
         )
 
-    @staticmethod
-    def _parse_email_request(question: str) -> tuple[str, bool]:
-        normalized = question.strip().lower()
-        if not normalized:
-            return "", False
-        if "email" not in normalized and "send" not in normalized:
-            return "", False
-        match = _EMAIL_ADDRESS_PATTERN.search(question)
-        if not match:
-            return "", False
-        wants_attachment = bool(
-            re.search(
-                r"\b(?:as|with)\s+attachment\b|\battached\b|\battach(?:ment)?\b", normalized)
-        )
-        return match.group("recipient").strip(), wants_attachment
-
-    def _get_last_shareable_answer(self) -> tuple[str, str]:
-        for turn in reversed(self.chat_history):
-            if turn.get("mode") in {"database", "general"}:
-                return turn.get("question", ""), turn.get("answer", "")
-        return "", ""
-
-    def _get_formatted_email_answer(self, answer: str) -> str:
-        if self._looks_like_markdown_table(answer):
-            return answer
-
-        converted = self._to_markdown_table(answer)
-        return converted or answer
-
-    def _get_email_configuration_error(self) -> str:
-        required_settings = {
-            "GRAPH_MAIL_TENANT_ID": self.config.graph_mail_tenant_id,
-            "GRAPH_MAIL_CLIENT_ID": self.config.graph_mail_client_id,
-            "GRAPH_MAIL_CLIENT_SECRET": self.config.graph_mail_client_secret,
-            "GRAPH_MAIL_SENDER": self.config.graph_mail_sender,
-        }
-        missing_settings = [
-            setting_name
-            for setting_name, setting_value in required_settings.items()
-            if not setting_value
-        ]
-        if not missing_settings:
-            return ""
-        return (
-            "Email sending is not configured. Missing: "
-            + ", ".join(missing_settings)
-            + "."
-        )
-
-    def _build_email_subject(self, source_question: str) -> str:
-        normalized = " ".join(source_question.split()).strip()
-        if not normalized:
-            return "Earthquake Agent result"
-        if len(normalized) > 70:
-            normalized = normalized[:67] + "..."
-        return f"Earthquake Agent result: {normalized}"
-
-    def _send_last_answer_to_email(self, recipient: str, wants_attachment: bool = False) -> str:
-        source_question, source_answer = self._get_last_shareable_answer()
+    def _send_last_answer_to_email(
+        self,
+        recipient: str,
+        wants_attachment: bool = False,
+        attachment_format: str | None = None,
+    ) -> str:
+        source_question, source_answer = get_last_shareable_answer(
+            self.chat_history)
         if not source_answer:
             return "There is no previous result to email yet."
 
-        configuration_error = self._get_email_configuration_error()
+        configuration_error = get_email_configuration_error(self.config)
         if configuration_error:
             return configuration_error
 
-        formatted_answer = self._get_formatted_email_answer(source_answer)
-        text_body = (
-            f"Source question: {source_question}\n\n"
-            f"{formatted_answer}"
+        email_payload = build_email_payload(
+            source_question,
+            source_answer,
+            wants_attachment,
+            attachment_format,
         )
-        html_body = build_result_email_html(source_question, formatted_answer)
-        attachment = build_email_attachment(
-            formatted_answer) if wants_attachment else None
         sender = GraphMailSender(
             tenant_id=self.config.graph_mail_tenant_id or "",
             client_id=self.config.graph_mail_client_id or "",
@@ -763,10 +368,10 @@ class SqlAgentApp:
         try:
             sender.send_mail(
                 recipient=recipient,
-                subject=self._build_email_subject(source_question),
-                html_body=html_body,
-                text_body=text_body,
-                attachment=attachment,
+                subject=build_email_subject(source_question),
+                html_body=str(email_payload["html_body"]),
+                text_body=str(email_payload["text_body"]),
+                attachment=email_payload["attachment"],
             )
         except RuntimeError as error:
             LOGGER.exception("Email delivery failed")
@@ -802,13 +407,16 @@ class SqlAgentApp:
             raise ValueError("Please provide a SQL SELECT query.")
         if not normalized.startswith("select"):
             raise ValueError("Only SELECT queries can be exported.")
-        error = self._validate_sql(sql_query)
+        error = validate_sql(sql_query)
         if error:
             raise ValueError(error)
-        allowed_tables_error = self._validate_allowed_tables(sql_query)
+        allowed_tables_error = validate_allowed_tables(
+            sql_query,
+            self.config.sql_allowed_tables,
+        )
         if allowed_tables_error:
             raise ValueError(allowed_tables_error)
-        self._validate_export_query(sql_query)
+        validate_export_query(sql_query, self._get_max_export_rows())
 
         engine = self.db._engine
         with engine.connect() as connection:
@@ -826,26 +434,29 @@ class SqlAgentApp:
         4. Database question → route through the LangChain SQL agent.
         Stores every turn in chat_history and handles the 'result too large' error gracefully.
         """
-        recipient, wants_attachment = self._parse_email_request(question)
+        recipient, wants_attachment, attachment_format = parse_email_request(
+            question)
         if recipient:
-            return self._send_last_answer_to_email(recipient, wants_attachment)
+            return self._send_last_answer_to_email(
+                recipient,
+                wants_attachment,
+                attachment_format,
+            )
 
-        if self.chat_history and self._is_table_format_follow_up(question):
+        if self.chat_history and is_table_format_follow_up(question):
             last_db_answer = self._get_last_database_answer()
             if last_db_answer:
-                converted = self._to_markdown_table(last_db_answer)
+                converted = to_markdown_table(last_db_answer)
                 if converted:
                     answer = converted
                 else:
                     answer = self._ask_general(
-                        self._build_table_format_prompt(
-                            question, last_db_answer)
-                    )
+                        build_table_format_prompt(question, last_db_answer))
                 self._remember_interaction("general", question, answer)
                 return answer
 
-        if not self._is_database_question(question):
-            if self.chat_history and self._is_follow_up_question(question):
+        if not is_database_question(question):
+            if self.chat_history and is_follow_up_question(question, bool(self.chat_history)):
                 answer = self._ask_general(
                     self._build_follow_up_prompt(question))
             else:
@@ -856,7 +467,7 @@ class SqlAgentApp:
         try:
             # For database follow-up questions, include conversation context
             question_to_ask = question
-            if self.chat_history and self._is_follow_up_question(question):
+            if self.chat_history and is_follow_up_question(question, bool(self.chat_history)):
                 question_to_ask = self._build_database_follow_up_prompt(
                     question)
 
@@ -864,8 +475,8 @@ class SqlAgentApp:
             answer = result["output"]
 
             # If user explicitly asked for table format, normalize the answer into markdown table.
-            if self._is_table_format_follow_up(question):
-                converted_answer = self._to_markdown_table(answer)
+            if is_table_format_follow_up(question):
+                converted_answer = to_markdown_table(answer)
                 if converted_answer:
                     answer = converted_answer
 

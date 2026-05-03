@@ -108,6 +108,32 @@ class TestEmailDelivery(unittest.TestCase):
         self.assertEqual(content_type, "text/csv")
         self.assertTrue(content_bytes)
 
+    @patch("app.sql_agent_app.GraphMailSender")
+    def test_send_email_with_explicit_csv_request_forces_csv_attachment(self, graph_mail_sender) -> None:
+        sender = graph_mail_sender.return_value
+        app = self._build_app()
+        app.chat_history = [
+            {
+                "mode": "database",
+                "question": "Show the latest Australian earthquakes",
+                "answer": "Latest results:\nquake 1\nquake 2",
+            }
+        ]
+
+        result = app.ask(
+            "email it to alice@example.com the .csv file as attachment")
+
+        self.assertEqual(
+            result,
+            "Sent the latest result to alice@example.com with an attachment.",
+        )
+        sender.send_mail.assert_called_once()
+        _, kwargs = sender.send_mail.call_args
+        attachment_name, content_type, content_bytes = kwargs["attachment"]
+        self.assertEqual(attachment_name, "earthquake_result.csv")
+        self.assertEqual(content_type, "text/csv")
+        self.assertTrue(content_bytes)
+
 
 if __name__ == "__main__":
     unittest.main()
