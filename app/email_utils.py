@@ -1,3 +1,4 @@
+import ast
 import html
 import json
 import logging
@@ -48,6 +49,29 @@ def _extract_markdown_table_lines(text: str) -> list[str]:
         return table_lines
 
     return []
+
+
+def extract_markdown_table_rows(text: str) -> tuple[list[str], list[list[str]]]:
+    lines = _extract_markdown_table_lines(text)
+    if len(lines) < 2:
+        return [], []
+
+    headers = _split_markdown_row(lines[0])
+    separators = _split_markdown_row(lines[1])
+    if not headers or not separators or len(headers) != len(separators):
+        return [], []
+    if not all(set(cell) <= {":", "-", " "} for cell in separators):
+        return [], []
+
+    rows: list[list[str]] = []
+    for line in lines[2:]:
+        row = _split_markdown_row(line)
+        if not row:
+            continue
+        padded = row + [""] * (len(headers) - len(row))
+        rows.append(padded[: len(headers)])
+
+    return headers, rows
 
 
 def markdown_table_to_html(markdown_table: str) -> str:
@@ -107,26 +131,70 @@ def build_result_email_html(source_question: str, formatted_answer: str) -> str:
 
 
 def _markdown_table_rows(markdown_table: str) -> tuple[list[str], list[list[str]]]:
-    lines = _extract_markdown_table_lines(markdown_table)
-    if len(lines) < 2:
+    return extract_markdown_table_rows(markdown_table)
+
+
+def extract_duplicate_markdown_rows(text: str) -> tuple[list[str], list[list[str]]]:
+    headers, rows = extract_markdown_table_rows(text)
+    if not headers or not rows:
         return [], []
 
-    headers = _split_markdown_row(lines[0])
-    separators = _split_markdown_row(lines[1])
-    if not headers or not separators or len(headers) != len(separators):
-        return [], []
-    if not all(set(cell) <= {":", "-", " "} for cell in separators):
+    counts: dict[tuple[str, ...], int] = {}
+    ordered_duplicates: list[list[str]] = []
+    for row in rows:
+        key = tuple(row)
+        counts[key] = counts.get(key, 0) + 1
+        if counts[key] == 2:
+            ordered_duplicates.append(row)
+
+    return headers, ordered_duplicates
+
+
+def extract_duplicate_raw_result_rows(raw_result: str) -> tuple[list[str], list[list[str]]]:
+    if not raw_result or not raw_result.strip():
         return [], []
 
+    try:
+        parsed = ast.literal_eval(raw_result)
+    except (SyntaxError, ValueError):
+        return [], []
+
+    if not isinstance(parsed, list) or not parsed:
+        return [], []
+
+    first_row = parsed[0]
     rows: list[list[str]] = []
-    for line in lines[2:]:
-        row = _split_markdown_row(line)
-        if not row:
-            continue
-        padded = row + [""] * (len(headers) - len(row))
-        rows.append(padded[: len(headers)])
+    headers: list[str] = []
 
-    return headers, rows
+    if isinstance(first_row, dict):
+        headers = [str(key) for key in first_row.keys()]
+        for item in parsed:
+            if not isinstance(item, dict):
+                return [], []
+            rows.append([str(item.get(key, "")) for key in first_row.keys()])
+    elif isinstance(first_row, (list, tuple)):
+        tuple_rows = [item for item in parsed if isinstance(
+            item, (list, tuple))]
+        if len(tuple_rows) != len(parsed):
+            return [], []
+        column_count = max(len(item) for item in tuple_rows)
+        headers = [f"Column {index + 1}" for index in range(column_count)]
+        for item in tuple_rows:
+            padded = [str(value) for value in item] + \
+                [""] * (column_count - len(item))
+            rows.append(padded[:column_count])
+    else:
+        return [], []
+
+    counts: dict[tuple[str, ...], int] = {}
+    ordered_duplicates: list[list[str]] = []
+    for row in rows:
+        key = tuple(row)
+        counts[key] = counts.get(key, 0) + 1
+        if counts[key] == 2:
+            ordered_duplicates.append(row)
+
+    return headers, ordered_duplicates
 
 
 def _build_csv_attachment_from_rows(headers: list[str], rows: list[list[str]]) -> tuple[str, str, str]:
@@ -134,13 +202,16 @@ def _build_csv_attachment_from_rows(headers: list[str], rows: list[list[str]]) -
     writer = csv.writer(output)
     writer.writerow(headers)
     writer.writerows(rows)
-    encoded = base64.b64encode(output.getvalue().encode("utf-8")).decode("ascii")
+    encoded = base64.b64encode(
+        output.getvalue().encode("utf-8")).decode("ascii")
     return ("earthquake_result.csv", "text/csv", encoded)
 
 
 def _build_csv_attachment_from_text(formatted_answer: str) -> tuple[str, str, str]:
-    lines = [line.strip() for line in formatted_answer.splitlines() if line.strip()]
-    rows = [[line] for line in lines] if lines else [[formatted_answer.strip()]]
+    lines = [line.strip()
+             for line in formatted_answer.splitlines() if line.strip()]
+    rows = [[line] for line in lines] if lines else [
+        [formatted_answer.strip()]]
     return _build_csv_attachment_from_rows(["Value"], rows)
 
 

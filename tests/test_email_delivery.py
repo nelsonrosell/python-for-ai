@@ -15,11 +15,14 @@ class TestEmailDelivery(unittest.TestCase):
                 "graph_mail_client_id": "client-id",
                 "graph_mail_client_secret": "client-secret",
                 "graph_mail_sender": "sender@example.com",
+                "auto_email_duplicate_alerts": False,
+                "duplicate_alert_recipient": None,
                 "sql_allowed_tables": (),
                 "max_export_rows": 500,
             },
         )()
         app.chat_history = []
+        app._last_db_run_result = ""
         app.max_history_turns = 8
         return app
 
@@ -129,6 +132,61 @@ class TestEmailDelivery(unittest.TestCase):
         )
         sender.send_mail.assert_called_once()
         _, kwargs = sender.send_mail.call_args
+        attachment_name, content_type, content_bytes = kwargs["attachment"]
+        self.assertEqual(attachment_name, "earthquake_result.csv")
+        self.assertEqual(content_type, "text/csv")
+        self.assertTrue(content_bytes)
+
+    @patch("app.sql_agent_app.GraphMailSender")
+    def test_database_answer_with_duplicate_raw_rows_triggers_alert_email(self, graph_mail_sender) -> None:
+        sender = graph_mail_sender.return_value
+        app = self._build_app()
+        app.config.auto_email_duplicate_alerts = True
+        app.config.duplicate_alert_recipient = "alerts@example.com"
+
+        class FakeAgent:
+            def invoke(self, _question: str) -> dict[str, str]:
+                app._last_db_run_result = "[(1, 'Quake A'), (1, 'Quake A'), (2, 'Quake B')]"
+                return {"output": "Here are the latest earthquakes in Australia."}
+
+        app.agent = FakeAgent()
+
+        result = app.ask("show latest earthquakes")
+
+        self.assertEqual(
+            result, "Here are the latest earthquakes in Australia.")
+        sender.send_mail.assert_called_once()
+        _, kwargs = sender.send_mail.call_args
+        self.assertEqual(kwargs["recipient"], "alerts@example.com")
+        self.assertIsNotNone(kwargs["attachment"])
+        attachment_name, content_type, content_bytes = kwargs["attachment"]
+        self.assertEqual(attachment_name, "earthquake_result.csv")
+        self.assertEqual(content_type, "text/csv")
+        self.assertTrue(content_bytes)
+
+    @patch("app.sql_agent_app.GraphMailSender")
+    def test_database_answer_with_duplicate_rows_triggers_alert_email(self, graph_mail_sender) -> None:
+        sender = graph_mail_sender.return_value
+        app = self._build_app()
+        app.config.auto_email_duplicate_alerts = True
+        app.config.duplicate_alert_recipient = "alerts@example.com"
+        app.agent = type(
+            "Agent",
+            (),
+            {
+                "invoke": lambda self, _: {
+                    "output": "| ID | Title |\n| --- | --- |\n| 1 | Quake A |\n| 1 | Quake A |\n| 2 | Quake B |"
+                }
+            },
+        )()
+
+        result = app.ask("show latest earthquakes in table format")
+
+        self.assertIn("| ID | Title |", result)
+        sender.send_mail.assert_called_once()
+        _, kwargs = sender.send_mail.call_args
+        self.assertEqual(kwargs["recipient"], "alerts@example.com")
+        self.assertIsNotNone(kwargs["attachment"])
         attachment_name, content_type, content_bytes = kwargs["attachment"]
         self.assertEqual(attachment_name, "earthquake_result.csv")
         self.assertEqual(content_type, "text/csv")

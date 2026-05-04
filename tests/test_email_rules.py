@@ -7,6 +7,7 @@ from app.email_rules import (
     get_formatted_email_answer,
     get_last_shareable_answer,
 )
+from app.email_utils import extract_duplicate_raw_result_rows
 
 
 class TestEmailRules(unittest.TestCase):
@@ -91,10 +92,18 @@ class TestEmailRules(unittest.TestCase):
         )
         attachment = payload["attachment"]
         self.assertIsNotNone(attachment)
-        attachment_name, content_type, content_bytes = attachment  # type: ignore[misc]
+        # type: ignore[misc]
+        attachment_name, content_type, content_bytes = attachment
         self.assertEqual(attachment_name, "earthquake_result.csv")
         self.assertEqual(content_type, "text/csv")
         self.assertIn("SUQsVGl0bGUsTWFnbml0dWRl", content_bytes)
+
+    def test_extract_duplicate_raw_result_rows_from_tuple_output(self) -> None:
+        headers, rows = extract_duplicate_raw_result_rows(
+            "[(1, 'Quake A'), (1, 'Quake A'), (2, 'Quake B')]"
+        )
+        self.assertEqual(headers, ["Column 1", "Column 2"])
+        self.assertEqual(rows, [["1", "Quake A"]])
 
 
 if __name__ == "__main__":

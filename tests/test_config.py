@@ -77,6 +77,30 @@ class TestLoadConfig(unittest.TestCase):
         self.assertEqual(config.graph_mail_client_id, "client-id")
         self.assertEqual(config.graph_mail_client_secret, "client-secret")
         self.assertEqual(config.graph_mail_sender, "sender@example.com")
+        self.assertFalse(config.auto_email_duplicate_alerts)
+        self.assertIsNone(config.duplicate_alert_recipient)
+
+    @patch.dict(
+        os.environ,
+        {
+            "SQL_CONNECTION_STRING": "Driver={ODBC Driver 18 for SQL Server};Server=tcp:workspace.datawarehouse.fabric.microsoft.com,1433;Database=mydb;Encrypt=yes;TrustServerCertificate=no;",
+            "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com/",
+            "AZURE_OPENAI_API_KEY": "fake-key",
+            "AZURE_OPENAI_API_VERSION": "2024-02-01",
+            "AZURE_OPENAI_DEPLOYMENT": "gpt-4o",
+            "GRAPH_MAIL_TENANT_ID": "tenant-id",
+            "GRAPH_MAIL_CLIENT_ID": "client-id",
+            "GRAPH_MAIL_CLIENT_SECRET": "client-secret",
+            "GRAPH_MAIL_SENDER": "sender@example.com",
+            "APP_AUTO_EMAIL_DUPLICATE_ALERTS": "true",
+            "APP_DUPLICATE_ALERT_RECIPIENT": "alerts@example.com",
+        },
+        clear=True,
+    )
+    def test_loads_optional_duplicate_alert_settings(self) -> None:
+        config = load_config()
+        self.assertTrue(config.auto_email_duplicate_alerts)
+        self.assertEqual(config.duplicate_alert_recipient, "alerts@example.com")
 
     @patch.dict(
         os.environ,

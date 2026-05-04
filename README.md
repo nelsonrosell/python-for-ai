@@ -159,6 +159,7 @@ Key code paths:
 
 - `app/` contains the application logic, config, SQL agent, export helpers, and visualization code.
 - `streamlit_app.py` is the active Streamlit entrypoint.
+- `css/streamlit_app.css` contains the Streamlit stylesheet used by the UI.
 - `scripts/` contains helper and maintenance scripts.
 - `docs/architecture/` contains Mermaid diagrams and architecture artifacts.
 - `requirements/base.txt` contains runtime dependencies and `requirements/dev.txt` layers on development-only packages.
