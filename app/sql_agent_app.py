@@ -22,7 +22,11 @@ from .email_rules import (
     get_email_configuration_error,
     get_last_shareable_answer,
 )
-from .email_utils import GraphMailSender
+from .email_utils import (
+    GraphMailSender,
+    extract_duplicate_markdown_rows,
+    extract_duplicate_raw_result_rows,
+)
 from .export import export_rows_to_csv
 from .request_routing import (
     is_database_question,
@@ -70,6 +74,7 @@ class SqlAgentApp:
         self.general_llm = self._create_llm()
         self.visualizer = EarthquakeVisualizer()
         self.chat_history: list[dict[str, str]] = []
+        self._last_db_run_result = ""
         self.max_history_turns = 8
         self.agent = self._create_agent()
 
@@ -233,8 +238,14 @@ class SqlAgentApp:
             query_text = command if isinstance(command, str) else str(command)
             error = validate_query(query_text, self.config.sql_allowed_tables)
             if error:
+                self._last_db_run_result = ""
                 return error
-            return original_run(command, *args, **kwargs)
+            result = original_run(command, *args, **kwargs)
+            normalized_query = query_text.strip().lower()
+            if normalized_query.startswith("select") or normalized_query.startswith("with"):
+                self._last_db_run_result = result if isinstance(
+                    result, str) else str(result)
+            return result
 
         self.db.run = guarded_run  # type: ignore[method-assign]
 
@@ -352,6 +363,33 @@ class SqlAgentApp:
         if configuration_error:
             return configuration_error
 
+        try:
+            self._send_email_result(
+                recipient,
+                source_question,
+                source_answer,
+                wants_attachment,
+                attachment_format,
+            )
+        except RuntimeError as error:
+            LOGGER.exception("Email delivery failed")
+            return f"Email delivery failed: {error}"
+
+        confirmation = f"Sent the latest result to {recipient}."
+        if wants_attachment:
+            confirmation = f"Sent the latest result to {recipient} with an attachment."
+        self._remember_interaction(
+            "email", f"send this to {recipient}", confirmation)
+        return confirmation
+
+    def _send_email_result(
+        self,
+        recipient: str,
+        source_question: str,
+        source_answer: str,
+        wants_attachment: bool = False,
+        attachment_format: str | None = None,
+    ) -> None:
         email_payload = build_email_payload(
             source_question,
             source_answer,
@@ -365,24 +403,60 @@ class SqlAgentApp:
             sender_user_id=self.config.graph_mail_sender or "",
         )
 
-        try:
-            sender.send_mail(
-                recipient=recipient,
-                subject=build_email_subject(source_question),
-                html_body=str(email_payload["html_body"]),
-                text_body=str(email_payload["text_body"]),
-                attachment=email_payload["attachment"],
-            )
-        except RuntimeError as error:
-            LOGGER.exception("Email delivery failed")
-            return f"Email delivery failed: {error}"
+        sender.send_mail(
+            recipient=recipient,
+            subject=build_email_subject(source_question),
+            html_body=str(email_payload["html_body"]),
+            text_body=str(email_payload["text_body"]),
+            attachment=email_payload["attachment"],
+        )
 
-        confirmation = f"Sent the latest result to {recipient}."
-        if wants_attachment:
-            confirmation = f"Sent the latest result to {recipient} with an attachment."
-        self._remember_interaction(
-            "email", f"send this to {recipient}", confirmation)
-        return confirmation
+    def _maybe_send_duplicate_alert(self, source_question: str, source_answer: str) -> None:
+        if not getattr(self.config, "auto_email_duplicate_alerts", False):
+            return
+
+        recipient = getattr(self.config, "duplicate_alert_recipient", None)
+        if not recipient:
+            return
+
+        configuration_error = get_email_configuration_error(self.config)
+        if configuration_error:
+            LOGGER.warning("Skipping duplicate alert email: %s",
+                           configuration_error)
+            return
+
+        headers, duplicate_rows = extract_duplicate_raw_result_rows(
+            getattr(self, "_last_db_run_result", "")
+        )
+        if not headers or not duplicate_rows:
+            headers, duplicate_rows = extract_duplicate_markdown_rows(
+                source_answer)
+        if not headers or not duplicate_rows:
+            return
+
+        duplicate_table_lines = [
+            "| " + " | ".join(headers) + " |",
+            "| " + " | ".join(["---"] * len(headers)) + " |",
+        ]
+        for row in duplicate_rows:
+            escaped = [value.replace("|", "\\|") for value in row]
+            duplicate_table_lines.append("| " + " | ".join(escaped) + " |")
+
+        duplicate_answer = (
+            "Duplicate rows were detected in the latest database result.\n\n"
+            + "\n".join(duplicate_table_lines)
+        )
+
+        try:
+            self._send_email_result(
+                recipient,
+                f"Duplicate rows detected for: {source_question}",
+                duplicate_answer,
+                wants_attachment=True,
+                attachment_format="csv",
+            )
+        except RuntimeError:
+            LOGGER.exception("Duplicate alert email failed")
 
     def _ask_general(self, question: str) -> str:
         """Send a question directly to the general-purpose LLM (bypassing the
@@ -467,6 +541,7 @@ class SqlAgentApp:
         try:
             # For database follow-up questions, include conversation context
             question_to_ask = question
+            self._last_db_run_result = ""
             if self.chat_history and is_follow_up_question(question, bool(self.chat_history)):
                 question_to_ask = self._build_database_follow_up_prompt(
                     question)
@@ -481,6 +556,7 @@ class SqlAgentApp:
                     answer = converted_answer
 
             self._remember_interaction("database", question, answer)
+            self._maybe_send_duplicate_alert(question, answer)
             return answer
         except Exception as e:
             error_msg = str(e)

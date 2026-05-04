@@ -13,7 +13,8 @@ from app.env import load_environment
 from app.logging_utils import configure_logging
 
 
-CHATGPT_STYLE_PATH = Path(__file__).with_name("streamlit_app.css")
+CHATGPT_STYLE_PATH = Path(__file__).with_name(
+    "css").joinpath("streamlit_app.css")
 LOG_FILE_PATH = configure_logging()
 LOGGER = logging.getLogger(__name__)
 AUTH_SESSION_KEYS = (

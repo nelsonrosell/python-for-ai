@@ -1,0 +1,49 @@
+flowchart LR
+    U[User]
+    UI[Chat UI\nStreamlit or Web App]
+    Router[Request Router\nSQL vs RAG vs Hybrid]
+    Orchestrator[Hybrid Agent Orchestrator]
+    Answer[Answer Composer\nCitations and Grounding]
+
+    subgraph Retrieval[SharePoint RAG Path]
+        SPTool[SharePoint Connector]
+        Extract[Document Extraction\nPDF DOCX PPTX XLSX MD]
+        Chunk[Chunking and Metadata]
+        Index[Vector or Hybrid Index]
+        Retrieve[Retriever\nSemantic + Keyword + Filters]
+    end
+
+    subgraph Data[SQL Path]
+        Guard[SQL Guardrails\nAllowlist + Validation]
+        SQLTool[SQL Tool]
+        Fabric[(SQL Database / Fabric)]
+    end
+
+    subgraph Model[LLM Layer]
+        LLM[Azure OpenAI / LLM]
+    end
+
+    subgraph Actions[Optional Action Tools]
+        Mail[Email Tool]
+        Export[Export Tool]
+        Alert[Workflow / Alert Tool]
+    end
+
+    U --> UI
+    UI --> Router
+    Router --> Orchestrator
+
+    Orchestrator -->|RAG| Retrieve
+    SPTool --> Extract --> Chunk --> Index --> Retrieve
+
+    Orchestrator -->|SQL| Guard --> SQLTool --> Fabric
+    Fabric --> SQLTool --> Orchestrator
+
+    Retrieve --> Orchestrator
+    Orchestrator --> LLM
+    LLM --> Answer
+    Answer --> UI
+
+    Orchestrator --> Mail
+    Orchestrator --> Export
+    Orchestrator --> Alert

@@ -23,6 +23,8 @@ class AppConfig:
     graph_mail_client_id: str | None
     graph_mail_client_secret: str | None
     graph_mail_sender: str | None
+    auto_email_duplicate_alerts: bool
+    duplicate_alert_recipient: str | None
 
 
 REQUIRED_KEYS = [
@@ -109,4 +111,6 @@ def load_config() -> AppConfig:
         graph_mail_client_id=os.getenv("GRAPH_MAIL_CLIENT_ID") or None,
         graph_mail_client_secret=os.getenv("GRAPH_MAIL_CLIENT_SECRET") or None,
         graph_mail_sender=os.getenv("GRAPH_MAIL_SENDER") or None,
+        auto_email_duplicate_alerts=_get_bool_env("APP_AUTO_EMAIL_DUPLICATE_ALERTS", False),
+        duplicate_alert_recipient=os.getenv("APP_DUPLICATE_ALERT_RECIPIENT") or None,
     )
