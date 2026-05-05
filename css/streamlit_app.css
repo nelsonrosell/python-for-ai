@@ -9,6 +9,7 @@
     --prompt-width: 580px;
     --content-inset: 1.35rem;
     --prompt-left-offset: calc((var(--content-width) - var(--prompt-width)) / 2 + var(--content-inset));
+    --history-right-shift: 0.65rem;
 }
 
 [data-testid="stSidebar"] {
@@ -145,14 +146,14 @@
 .stChatMessage,
 .stChatMessage[data-testid="stChatMessage"] {
     margin-bottom: 1rem;
-    margin-left: var(--prompt-left-offset);
+    margin-left: calc(var(--prompt-left-offset) + var(--history-right-shift));
     padding-top: 1rem;
     padding-right: 1.15rem;
     padding-bottom: 1rem;
     padding-left: 2.6rem !important;
     border: 1px solid var(--border);
     border-radius: 1.15rem;
-    max-width: calc(var(--content-width) - var(--prompt-left-offset));
+    max-width: calc(var(--content-width) - var(--prompt-left-offset) - var(--history-right-shift));
 }
 
 .stChatMessage:last-of-type {
@@ -180,7 +181,7 @@
 }
 
 .stChatMessage [data-testid="stMarkdownContainer"] {
-    padding-left: 1.15rem !important;
+    padding-left: 1.65rem !important;
 }
 
 .stChatMessage [data-testid="stMarkdownContainer"] p,
@@ -305,6 +306,16 @@
     width: min(100%, var(--prompt-width));
     max-width: var(--prompt-width);
     margin-right: auto;
+    border: 1px solid var(--border) !important;
+    border-radius: 0.9rem;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+[data-testid="stChatInput"] > div:focus-within {
+    border-color: var(--border) !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 
 [data-testid="stChatInput"] button {
@@ -312,29 +323,39 @@
 }
 
 [data-testid="stChatInput"] [data-baseweb="textarea"] {
-    border-color: transparent;
-    box-shadow: none;
+    border-color: transparent !important;
+    box-shadow: none !important;
     background: var(--surface);
     justify-content: flex-start;
     text-align: left;
     width: 100%;
+    outline: none !important;
 }
 
 [data-testid="stChatInput"] [data-baseweb="textarea"]:focus-within {
-    border-color: transparent;
-    box-shadow: none;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 
 [data-testid="stChatInput"] textarea {
-    box-shadow: none;
-    outline: none;
+    box-shadow: none !important;
+    outline: none !important;
+    border-color: transparent !important;
     text-align: left;
     padding-left: 0.75rem;
 }
 
 [data-testid="stChatInput"] [data-baseweb="textarea"]:has(textarea[aria-invalid="true"]) {
-    border-color: transparent;
-    box-shadow: none;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+[data-testid="stChatInput"] *:focus,
+[data-testid="stChatInput"] *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
 }
 
 .block-container {
