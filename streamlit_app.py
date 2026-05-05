@@ -13,8 +13,7 @@ from app.env import load_environment
 from app.logging_utils import configure_logging
 
 
-CHATGPT_STYLE_PATH = Path(__file__).with_name(
-    "css").joinpath("streamlit_app.css")
+CHATGPT_STYLE_PATH = Path(__file__).with_name("css").joinpath("streamlit_app.css")
 LOG_FILE_PATH = configure_logging()
 LOGGER = logging.getLogger(__name__)
 AUTH_SESSION_KEYS = (
@@ -48,8 +47,7 @@ def _get_positive_int_env(name: str, default: int) -> int:
 
     parsed = int(value)
     if parsed <= 0:
-        raise ValueError(
-            f"Environment variable {name} must be a positive integer.")
+        raise ValueError(f"Environment variable {name} must be a positive integer.")
     return parsed
 
 
@@ -99,17 +97,17 @@ def _get_ui_auth_principal() -> str:
 
 
 def _get_generic_prompt_error_message() -> str:
-    return "Sorry, something went wrong while processing your request. Please try again."
+    return (
+        "Sorry, something went wrong while processing your request. Please try again."
+    )
 
 
 def _expire_auth_session_if_needed(now: float | None = None) -> None:
     if not st.session_state.get("authenticated"):
         return
 
-    timeout_seconds = _get_positive_int_env(
-        "APP_AUTH_SESSION_TIMEOUT_SECONDS", 1800)
-    last_verified_at = float(st.session_state.get(
-        "auth_last_verified_at", 0.0) or 0.0)
+    timeout_seconds = _get_positive_int_env("APP_AUTH_SESSION_TIMEOUT_SECONDS", 1800)
+    last_verified_at = float(st.session_state.get("auth_last_verified_at", 0.0) or 0.0)
     if not last_verified_at:
         st.session_state["auth_last_verified_at"] = now or time.time()
         return
@@ -117,14 +115,15 @@ def _expire_auth_session_if_needed(now: float | None = None) -> None:
     current_time = now or time.time()
     if current_time - last_verified_at > timeout_seconds:
         _clear_auth_session()
-        st.session_state["auth_error_message"] = "Session expired. Please sign in again."
+        st.session_state["auth_error_message"] = (
+            "Session expired. Please sign in again."
+        )
 
 
 def _get_password_lock_state(
     session_state: MutableMapping[str, Any], now: float | None = None
 ) -> tuple[bool, str]:
-    locked_until = float(session_state.get(
-        "password_locked_until", 0.0) or 0.0)
+    locked_until = float(session_state.get("password_locked_until", 0.0) or 0.0)
     if not locked_until:
         return False, ""
 
@@ -151,9 +150,7 @@ def _record_failed_password_attempt(
     if attempts >= max_attempts:
         current_time = now or time.time()
         session_state["password_locked_until"] = current_time + lockout_seconds
-        return (
-            f"Too many incorrect password attempts. Try again in {lockout_seconds} second(s)."
-        )
+        return f"Too many incorrect password attempts. Try again in {lockout_seconds} second(s)."
     return "Incorrect password. Please try again."
 
 
@@ -230,8 +227,7 @@ def _check_password() -> bool:
         st.stop()
         return False
 
-    trusted_auth, principal = _check_trusted_header_auth(
-        dict(st.context.headers))
+    trusted_auth, principal = _check_trusted_header_auth(dict(st.context.headers))
     if trusted_auth:
         _mark_authenticated("trusted-header", principal)
         return True
@@ -320,7 +316,7 @@ def run_chat_turn(app: SqlAgentApp, question: str) -> dict[str, str]:
     normalized = question.lower()
 
     if normalized.startswith("export csv "):
-        sql_query = question[len("export csv "):].strip()
+        sql_query = question[len("export csv ") :].strip()
         return {
             "role": "assistant",
             "content": app.export_query_to_csv(sql_query),
@@ -354,8 +350,7 @@ def _submit_prompt(app: SqlAgentApp, prompt: str) -> None:
     except Exception as e:
         LOGGER.exception("Prompt processing failed")
         error_text = _get_generic_prompt_error_message()
-        st.session_state.messages.append(
-            {"role": "assistant", "content": error_text})
+        st.session_state.messages.append({"role": "assistant", "content": error_text})
 
 
 def _queue_prompt(prompt: str) -> None:
@@ -420,8 +415,7 @@ def _parse_markdown_table(table_lines: list[str]) -> list[dict[str, str]]:
         if not values:
             continue
         normalized_values = values + [""] * max(0, len(headers) - len(values))
-        row = {headers[idx]: normalized_values[idx]
-               for idx in range(len(headers))}
+        row = {headers[idx]: normalized_values[idx] for idx in range(len(headers))}
         rows.append(row)
     return rows
 
@@ -541,25 +535,37 @@ def _render_starter_prompts(app: SqlAgentApp) -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def _render_centered_prompt_form(*, show_loading: bool = False) -> str | None:
+def _render_centered_prompt_form(
+    *, show_loading: bool = False, pending_prompt: str = ""
+) -> str | None:
     outer_left, prompt_area, outer_right = st.columns([1.3, 6.7, 1])
     with prompt_area:
         if show_loading:
             _render_loading_status(compact=True)
 
-        st.markdown('<div class="centered-prompt-shell">',
-                    unsafe_allow_html=True)
-        with st.form("center_prompt_form", clear_on_submit=True, border=False):
-            prompt = st.text_input(
+        st.markdown('<div class="centered-prompt-shell">', unsafe_allow_html=True)
+        if show_loading:
+            st.text_input(
                 "Ask me about your data or even general questions",
-                placeholder="Ask me about your data or even general questions",
-                key="center_prompt_text",
+                value=pending_prompt,
+                key="center_prompt_loading_text",
                 label_visibility="collapsed",
+                disabled=True,
             )
-            submitted = st.form_submit_button(
-                "Send",
-                use_container_width=True,
-            )
+            prompt = ""
+            submitted = False
+        else:
+            with st.form("center_prompt_form", clear_on_submit=True, border=False):
+                prompt = st.text_input(
+                    "Ask me about your data or even general questions",
+                    placeholder="Ask me about your data or even general questions",
+                    key="center_prompt_text",
+                    label_visibility="collapsed",
+                )
+                submitted = st.form_submit_button(
+                    "Send",
+                    use_container_width=True,
+                )
         st.markdown("</div>", unsafe_allow_html=True)
 
     if submitted and prompt.strip():
@@ -576,7 +582,7 @@ def _render_loading_status(*, floating: bool = False, compact: bool = False) -> 
 
     st.markdown(
         f"""
-        <div class="{' '.join(class_names)}" aria-live="polite">
+        <div class="{" ".join(class_names)}" aria-live="polite">
             <span class="floating-answer-status__spinner" aria-hidden="true"></span>
             <span class="floating-answer-status__label">Searching for an answer...</span>
         </div>
@@ -609,8 +615,7 @@ def _render_export_expander(app: SqlAgentApp) -> None:
             "Export Query to CSV", key="main_export_button", use_container_width=True
         ):
             result = app.export_query_to_csv(export_query.strip())
-            st.session_state.messages.append(
-                {"role": "assistant", "content": result})
+            st.session_state.messages.append({"role": "assistant", "content": result})
             export_path = _extract_export_path(result)
             if export_path:
                 st.session_state["last_export_path"] = export_path
@@ -661,7 +666,8 @@ def main() -> None:
 
     if not has_messages:
         first_prompt = _render_centered_prompt_form(
-            show_loading=has_pending_prompt and st.session_state.pending_prompt_ready
+            show_loading=has_pending_prompt and st.session_state.pending_prompt_ready,
+            pending_prompt=st.session_state.pending_prompt,
         )
         if first_prompt:
             _queue_prompt(first_prompt)
@@ -733,7 +739,7 @@ def main() -> None:
                 }
             )
 
-        if st.button("Clear Chat Window", use_container_width=True):
+        if st.button("New Chat", use_container_width=True):
             st.session_state.messages = []
 
         st.divider()
@@ -750,8 +756,7 @@ def main() -> None:
         if has_pending_prompt and st.session_state.pending_prompt_ready:
             _render_loading_status(floating=True)
 
-        prompt = st.chat_input(
-            "Ask me about your data or even general questions")
+        prompt = st.chat_input("Ask me about your data or even general questions")
         if prompt:
             _queue_prompt(prompt)
             st.rerun()

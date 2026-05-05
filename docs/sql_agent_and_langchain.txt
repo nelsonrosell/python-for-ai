@@ -1,0 +1,87 @@
+SQL Agent and LangChain Relationship
+===================================
+
+Overview
+--------
+In this project, the SQL agent is not separate from LangChain.
+The SQL agent is built by LangChain, and the application wraps it with project-specific routing, security, formatting, and UI behavior.
+
+Simple mental model
+-------------------
+User question
+-> SqlAgentApp.ask(...)
+-> App decides whether the question is about the database
+-> If yes, send the request to the LangChain SQL agent
+-> LangChain uses the Azure OpenAI chat model plus SQL tools/database wrapper
+-> App post-processes the answer and stores chat history
+
+What this project owns
+----------------------
+The project code owns the application logic around the agent, including:
+- Routing whether a question is database-related or general
+- Authentication and environment/config loading
+- SQL guardrails and allowed-table validation
+- Follow-up question handling and history management
+- Formatting, charts, export, email, and Streamlit UI behavior
+
+What LangChain owns here
+------------------------
+LangChain provides the SQL-agent framework pieces, including:
+- The SQL agent factory via create_sql_agent
+- The SQLDatabase wrapper used by the agent
+- The AzureChatOpenAI model wrapper used by the SQL path
+- The agent execution loop that decides how to use SQL tools and return an answer
+
+Key code locations
+------------------
+1. app/sql_agent_app.py
+   - SqlAgentApp is the main orchestrator.
+   - _create_llm() builds the AzureChatOpenAI model.
+   - _create_db() builds the LangChain SQLDatabase wrapper.
+   - _create_agent() builds the LangChain SQL agent with create_sql_agent(...).
+   - ask() decides when to route a question into the SQL agent.
+
+2. app/request_routing.py
+   - Helps determine whether a user prompt is a database question, follow-up question, email request, and so on.
+
+3. app/sql_guardrails.py
+   - Applies project-specific SQL validation and safety checks.
+
+How the runtime flow works
+--------------------------
+1. The app receives a user question in SqlAgentApp.ask(...).
+2. The app checks special command paths first, such as email and formatting requests.
+3. If the question is not a database question, the app uses the general LLM path.
+4. If it is a database question, the app calls self.agent.invoke(...).
+5. self.agent is the LangChain SQL agent created by create_sql_agent(...).
+6. That agent uses:
+   - AzureChatOpenAI as the language model
+   - SQLDatabase as the database interface
+   - LangChain's SQL-agent tool execution behavior
+7. The result is returned to the app.
+8. The app may reformat it, save it in chat history, send alerts, or display it in Streamlit.
+
+Why LangChain is useful here
+----------------------------
+LangChain saves the project from having to manually implement:
+- Schema/tool wiring for SQL interactions
+- Agent tool-calling orchestration
+- The loop of generate SQL -> run query -> interpret results -> answer
+
+Why the app still matters
+-------------------------
+LangChain is only part of the system.
+Without the surrounding app code, the project would be missing:
+- Safe routing between general chat and SQL tasks
+- SQL validation and allowed-table enforcement
+- App-specific prompts and behaviors
+- Output shaping for the Streamlit experience
+- Export, charting, email, and operational features
+
+Bottom line
+-----------
+The SQL agent in this repo is a LangChain-built agent embedded inside the application's larger workflow.
+
+Short version:
+- LangChain provides the SQL agent engine.
+- This project provides the application behavior, controls, and user experience around it.
