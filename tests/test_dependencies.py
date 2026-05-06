@@ -1,7 +1,6 @@
+import unittest
 from importlib import metadata
 from pathlib import Path
-import unittest
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS_ROOT = PROJECT_ROOT / "requirements"

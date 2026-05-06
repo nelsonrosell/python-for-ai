@@ -1,8 +1,7 @@
 import logging
-from logging.handlers import RotatingFileHandler
 import os
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-
 
 _HANDLER_NAME = "python-for-ai-file-handler"
 _CONSOLE_HANDLER_NAME = "python-for-ai-console-handler"

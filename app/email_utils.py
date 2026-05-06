@@ -1,17 +1,16 @@
 import ast
+import base64
+import csv
 import html
+import io
 import json
 import logging
 import time
-import base64
-import csv
-import io
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from azure.identity import ClientSecretCredential
-
 
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 GRAPH_SENDMAIL_URL = "https://graph.microsoft.com/v1.0/users/{sender}/sendMail"

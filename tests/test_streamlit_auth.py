@@ -2,15 +2,15 @@ import os
 import unittest
 from unittest.mock import patch
 
-from streamlit_app import (
+from app.auth import (
     AUTH_SESSION_KEYS,
-    _check_trusted_header_auth,
-    _get_generic_prompt_error_message,
-    _get_header_value,
-    _get_password_lock_state,
-    _is_anonymous_dev_auth_allowed,
-    _record_failed_password_attempt,
-    _validate_trusted_header_auth_config,
+    check_trusted_header_auth,
+    get_generic_prompt_error_message,
+    get_header_value,
+    get_password_lock_state,
+    is_anonymous_dev_auth_allowed,
+    record_failed_password_attempt,
+    validate_trusted_header_auth_config,
 )
 
 
@@ -18,7 +18,7 @@ class TestStreamlitAuth(unittest.TestCase):
     def test_get_header_value_is_case_insensitive(self) -> None:
         headers = {"X-Authenticated-User": "alice@example.com"}
         self.assertEqual(
-            _get_header_value(headers, "x-authenticated-user"),
+            get_header_value(headers, "x-authenticated-user"),
             "alice@example.com",
         )
 
@@ -33,7 +33,7 @@ class TestStreamlitAuth(unittest.TestCase):
     )
     def test_trusted_header_auth_uses_header_value_as_principal(self) -> None:
         headers = {"x-authenticated-user": "alice@example.com"}
-        authenticated, principal = _check_trusted_header_auth(headers)
+        authenticated, principal = check_trusted_header_auth(headers)
         self.assertTrue(authenticated)
         self.assertEqual(principal, "alice@example.com")
 
@@ -51,7 +51,7 @@ class TestStreamlitAuth(unittest.TestCase):
             "x-forwarded-authenticated": "true",
             "x-authenticated-user": "alice@example.com",
         }
-        authenticated, principal = _check_trusted_header_auth(headers)
+        authenticated, principal = check_trusted_header_auth(headers)
         self.assertTrue(authenticated)
         self.assertEqual(principal, "alice@example.com")
 
@@ -65,14 +65,14 @@ class TestStreamlitAuth(unittest.TestCase):
     )
     def test_trusted_header_auth_rejects_wrong_expected_value(self) -> None:
         headers = {"x-forwarded-authenticated": "false"}
-        authenticated, principal = _check_trusted_header_auth(headers)
+        authenticated, principal = check_trusted_header_auth(headers)
         self.assertFalse(authenticated)
         self.assertEqual(principal, "")
 
     @patch.dict(os.environ, {}, clear=False)
     def test_anonymous_dev_auth_defaults_to_disabled(self) -> None:
         os.environ.pop("APP_ALLOW_ANONYMOUS_DEV_AUTH", None)
-        self.assertFalse(_is_anonymous_dev_auth_allowed())
+        self.assertFalse(is_anonymous_dev_auth_allowed())
 
     @patch.dict(
         os.environ,
@@ -82,7 +82,7 @@ class TestStreamlitAuth(unittest.TestCase):
         clear=False,
     )
     def test_anonymous_dev_auth_can_be_explicitly_enabled(self) -> None:
-        self.assertTrue(_is_anonymous_dev_auth_allowed())
+        self.assertTrue(is_anonymous_dev_auth_allowed())
 
     def test_auth_session_keys_clear_login_fields(self) -> None:
         self.assertIn("login_name", AUTH_SESSION_KEYS)
@@ -99,9 +99,9 @@ class TestStreamlitAuth(unittest.TestCase):
     def test_failed_password_attempts_trigger_lockout(self) -> None:
         state: dict[str, object] = {}
 
-        first_message = _record_failed_password_attempt(state, now=100.0)
-        second_message = _record_failed_password_attempt(state, now=101.0)
-        third_message = _record_failed_password_attempt(state, now=102.0)
+        first_message = record_failed_password_attempt(state, now=100.0)
+        second_message = record_failed_password_attempt(state, now=101.0)
+        third_message = record_failed_password_attempt(state, now=102.0)
 
         self.assertEqual(
             first_message, "Incorrect password. Please try again.")
@@ -120,7 +120,7 @@ class TestStreamlitAuth(unittest.TestCase):
             "password_locked_until": 150.0,
         }
 
-        locked, message = _get_password_lock_state(state, now=151.0)
+        locked, message = get_password_lock_state(state, now=151.0)
 
         self.assertFalse(locked)
         self.assertEqual(message, "")
@@ -138,7 +138,7 @@ class TestStreamlitAuth(unittest.TestCase):
     )
     def test_trusted_header_config_requires_expected_value_outside_dev(self) -> None:
         self.assertEqual(
-            _validate_trusted_header_auth_config("prod"),
+            validate_trusted_header_auth_config("prod"),
             "APP_TRUSTED_AUTH_VALUE must be configured when APP_TRUSTED_AUTH_HEADER is used outside dev.",
         )
 
@@ -153,7 +153,7 @@ class TestStreamlitAuth(unittest.TestCase):
     )
     def test_trusted_header_config_requires_distinct_user_header_outside_dev(self) -> None:
         self.assertEqual(
-            _validate_trusted_header_auth_config("prod"),
+            validate_trusted_header_auth_config("prod"),
             "APP_TRUSTED_USER_HEADER must be different from APP_TRUSTED_AUTH_HEADER outside dev.",
         )
 
@@ -167,11 +167,11 @@ class TestStreamlitAuth(unittest.TestCase):
         clear=False,
     )
     def test_trusted_header_config_allows_legacy_dev_setup(self) -> None:
-        self.assertEqual(_validate_trusted_header_auth_config("dev"), "")
+        self.assertEqual(validate_trusted_header_auth_config("dev"), "")
 
     def test_generic_prompt_error_message_hides_internal_details(self) -> None:
         self.assertEqual(
-            _get_generic_prompt_error_message(),
+            get_generic_prompt_error_message(),
             "Sorry, something went wrong while processing your request. Please try again.",
         )
 

@@ -1,7 +1,7 @@
 import argparse
-from pathlib import Path
 import sys
 import urllib.request
+from pathlib import Path
 
 
 def _build_parser() -> argparse.ArgumentParser:

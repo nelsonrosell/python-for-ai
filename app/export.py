@@ -5,8 +5,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-
 _EXPORTS_DIR = Path("exports")
+_DANGEROUS_SPREADSHEET_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _sanitize_filename(text: str, max_len: int = 40) -> str:
@@ -14,6 +14,15 @@ def _sanitize_filename(text: str, max_len: int = 40) -> str:
     text = re.sub(r"[^\w\s-]", "", text).strip()
     text = re.sub(r"\s+", "_", text)
     return text[:max_len]
+
+
+def _sanitize_csv_cell(value: object) -> object:
+    """Prevent spreadsheet apps from evaluating exported text as formulas."""
+    if not isinstance(value, str) or not value:
+        return value
+    if value.startswith(_DANGEROUS_SPREADSHEET_PREFIXES):
+        return "'" + value
+    return value
 
 
 def export_rows_to_csv(
@@ -41,7 +50,11 @@ def export_rows_to_csv(
         )
         writer.writeheader()
         for row in rows:
-            writer.writerow({column: row.get(column, "")
-                            for column in columns})
+            writer.writerow(
+                {
+                    column: _sanitize_csv_cell(row.get(column, ""))
+                    for column in columns
+                }
+            )
 
     return str(filename.resolve())

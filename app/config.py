@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
-from .env import load_environment
 
+from .env import load_environment
 
 load_environment()
 

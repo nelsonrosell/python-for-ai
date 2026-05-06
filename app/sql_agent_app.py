@@ -1,8 +1,8 @@
-import struct
 import logging
+import struct
 import warnings
-from urllib.parse import quote_plus
 from typing import Any
+from urllib.parse import quote_plus
 
 from azure.identity import (
     AzureCliCredential,
@@ -47,7 +47,6 @@ from .table_formatting import (
     to_markdown_table,
 )
 from .visualization import EarthquakeVisualizer
-
 
 SQL_ACCESS_TOKEN_ATTRIBUTE = 1256
 SQL_ACCESS_TOKEN_SCOPE = "https://database.windows.net/.default"

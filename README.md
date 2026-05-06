@@ -29,7 +29,7 @@ Security defaults:
 
 Environment template:
 
-- Start from [`.env.example`](e:/Repo/PythonProject/python-for-ai/.env.example) and copy it to `.env.dev` or `.env.prod`.
+- Start from `.env.example` and copy it to `.env.dev` or `.env.prod`.
 
 Deployment checklist:
 
@@ -41,6 +41,8 @@ Deployment checklist:
 - Set `SQL_ALLOWED_TABLES` to the minimum table/view allowlist needed by the app.
 - Keep `APP_MAX_EXPORT_ROWS` conservative for your data sensitivity.
 - Put Streamlit behind a reverse proxy or gateway that strips inbound auth headers from clients and injects the trusted headers itself.
+- Use a read-only database identity scoped to the minimum tables/views needed by the app.
+- Do not commit generated files from `exports/`, `logs/`, or `visualizations/`.
 
 Email delivery:
 
@@ -157,12 +159,13 @@ Key code paths:
 
 ## Project layout
 
-- `app/` contains the application logic, config, SQL agent, export helpers, and visualization code.
+- `app/` contains the application logic, auth helpers, config, SQL agent, export helpers, and visualization code.
 - `streamlit_app.py` is the active Streamlit entrypoint.
 - `css/streamlit_app.css` contains the Streamlit stylesheet used by the UI.
 - `scripts/` contains helper and maintenance scripts.
 - `docs/architecture/` contains Mermaid diagrams and architecture artifacts.
 - `requirements/base.txt` contains runtime dependencies and `requirements/dev.txt` layers on development-only packages.
+- `pyproject.toml` contains shared pytest and lint configuration.
 
 For the nicest colored output, use `pytest`:
 

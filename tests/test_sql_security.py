@@ -1,8 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from app.sql_guardrails import validate_allowed_tables, validate_export_query, validate_sql
 from app.sql_agent_app import SqlAgentApp
+from app.sql_guardrails import (
+    validate_allowed_tables,
+    validate_export_query,
+    validate_sql,
+)
 
 
 class TestSqlSecurity(unittest.TestCase):

@@ -1,6 +1,5 @@
 import re
 
-
 _EMAIL_ADDRESS_PATTERN = re.compile(
     r"(?P<recipient>[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
     re.IGNORECASE,

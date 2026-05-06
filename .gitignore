@@ -42,13 +42,19 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# Runtime outputs
+exports/
+logs/
+visualizations/*.png
+visualizations/*.jpg
+visualizations/*.jpeg
+
 # Environment — real files with secrets (never commit these)
 .env
 .env.local
 .env.dev
 .env.test
 .env.prod
-logs/app.log*
 # Allow example/template files
 !.env.example
 !.env.*.example

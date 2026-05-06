@@ -1,7 +1,7 @@
-from app.sql_agent_app import SqlAgentApp
-from pathlib import Path
 import sys
+from pathlib import Path
 
+from app.sql_agent_app import SqlAgentApp
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:

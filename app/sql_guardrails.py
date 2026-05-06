@@ -1,6 +1,5 @@
 import re
 
-
 DEFAULT_MAX_EXPORT_ROWS = 500
 _TABLE_REFERENCE_PATTERN = re.compile(
     r'\b(?:FROM|JOIN|APPLY|CROSS\s+APPLY|OUTER\s+APPLY)\s+([A-Za-z0-9_\.\[\]"]+)',
