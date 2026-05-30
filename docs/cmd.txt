@@ -1,0 +1,2 @@
+
+(Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& e:\Repo\PythonProject\python-for-ai\.venv\Scripts\Activate.ps1)
