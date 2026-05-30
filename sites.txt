@@ -1,7 +1,0 @@
-yRR8Q~_NAzsRs72r_StuPQN4vVrb1fGacGgVWaWI
-
-https://admin.cloud.microsoft/exchange?#/mailboxes - manage exchange admin 
-https://admin.cloud.microsoft/?#/users - Active users M365 admin center
-https://outlook.office.com/mail/inbox/id/AAQkADA3ZDY3MjgxLTUxNTQtNDUzNC1hZjZhLWU5ZTFiOTJlYmM1ZAAQAKmixk%2B140dCltS1WK%2Foa%2BE%3D - email outlook
-https://github.com/nelsonrosell/python-for-ai/pull/11 - GitHub repo 
-https://admin.cloud.microsoft/?source=tcemail%2Fb21baa7c-ace9-41dc-ce8b-3d8df0fa91af#/subscriptions - Microsoft 365 Business Basic
