@@ -55,20 +55,57 @@ Email delivery:
 GitHub Actions workflows are included for automated validation and optional deployment:
 
 - `.github/workflows/ci.yml` runs on pull requests and pushes to `main`, installs `requirements/dev.txt`, and runs `pytest tests -q`.
-- `.github/workflows/deploy.yml` reruns the same test suite on `main` and `workflow_dispatch`, then deploys the tracked repository contents to Azure App Service when the required GitHub configuration is present.
+- `.github/workflows/deploy.yml` reruns the Windows test suite on `main` and `workflow_dispatch`, then optionally builds a Linux container image and deploys that image to Azure App Service.
 
-To enable deployment, add these GitHub settings to the repository:
+## Azure App Service recommendation
 
-- Repository variable: `AZURE_WEBAPP_NAME`
-- Repository secret: `AZURE_WEBAPP_PUBLISH_PROFILE`
+Use Azure App Service for Containers rather than source-based App Service deployment.
 
-For an Azure Linux Web App running this Streamlit application, set the startup command to:
+Reason:
 
-```text
-python -m streamlit run streamlit_app.py --server.port 8000 --server.address 0.0.0.0
+- The app depends on `pyodbc` and the SQL Server ODBC 18 runtime.
+- The repository now includes a root `Dockerfile` that installs the required native packages and starts Streamlit through `start.sh`.
+- The app no longer requires `.env.prod` to exist inside the container as long as Azure App Settings provide the required values.
+
+Build the image locally with:
+
+```powershell
+docker build -t python-for-ai .
 ```
 
-Also configure the app settings in Azure from the same values you would place in `.env.prod`. The deployment workflow intentionally skips the deploy step until both the variable and secret are configured, so `main` can stay green before the hosting target is ready.
+Run the image locally with:
+
+```powershell
+docker run --rm -p 8000:8000 --env-file .env.prod python-for-ai
+```
+
+Create an Azure Linux Web App configured for a custom container and set:
+
+- `WEBSITES_PORT=8000`
+- The application settings from `.env.prod`
+
+Required application settings include:
+
+- `APP_ENV=prod`
+- `SQL_CONNECTION_STRING`
+- `SQL_ALLOWED_TABLES`
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_API_VERSION`
+- `AZURE_OPENAI_DEPLOYMENT`
+
+Optional settings include the trusted-header auth values, password auth settings, and Microsoft Graph mail settings from `.env.example`.
+
+To enable container deployment from GitHub Actions, add these repository settings:
+
+- Repository variable: `AZURE_WEBAPP_NAME`
+- Repository variable: `CONTAINER_REGISTRY_LOGIN_SERVER`
+- Repository variable: `CONTAINER_IMAGE_NAME` (optional, defaults to `python-for-ai`)
+- Repository secret: `AZURE_WEBAPP_PUBLISH_PROFILE`
+- Repository secret: `CONTAINER_REGISTRY_USERNAME`
+- Repository secret: `CONTAINER_REGISTRY_PASSWORD`
+
+The deployment workflow intentionally skips the container publish and deploy steps until all required values are configured, so `main` can stay green before the hosting target is ready.
 
 Local proxy helper:
 

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 _ENV_LOADED = False
 
 
-def load_environment() -> Path:
+def load_environment() -> Path | None:
     """Load the active environment file once and return the resolved path used."""
     global _ENV_LOADED
 
@@ -20,9 +20,7 @@ def load_environment() -> Path:
     elif fallback.exists():
         chosen = fallback
     else:
-        raise FileNotFoundError(
-            f"No environment file found. Expected '{env_file}' or '{fallback}'."
-        )
+        return None
 
     if not _ENV_LOADED:
         load_dotenv(chosen, override=False)
