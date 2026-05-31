@@ -68,7 +68,7 @@ class EarthquakeVisualizer:
     def generate_trend_chart(
         self, data: dict[str, list[int]], title: str = "Earthquake Trend by County"
     ) -> str:
-        """Generate a line chart showing earthquake trends over time/categories by county."""
+        """Generate a line chart showing earthquakes trends over time/categories by county."""
         fig, ax = plt.subplots(figsize=(12, 6))
 
         for county, counts in data.items():
