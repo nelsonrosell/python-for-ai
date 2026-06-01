@@ -92,13 +92,19 @@ class TestSqlSecurity(unittest.TestCase):
 
     @patch("app.sql_agent_app.InteractiveBrowserCredential")
     @patch("app.sql_agent_app.AzureCliCredential")
+    @patch("app.sql_agent_app.ManagedIdentityCredential")
+    @patch("app.sql_agent_app.EnvironmentCredential")
     @patch("app.sql_agent_app.ChainedTokenCredential")
     def test_create_token_credential_prefers_login_hint_interactive_credential(
         self,
         chained_token_credential,
+        environment_credential,
+        managed_identity_credential,
         azure_cli_credential,
         interactive_browser_credential,
     ) -> None:
+        environment_credential.return_value = "env"
+        managed_identity_credential.return_value = "managed"
         interactive_browser_credential.return_value = "interactive"
         azure_cli_credential.return_value = "cli"
 
@@ -115,11 +121,18 @@ class TestSqlSecurity(unittest.TestCase):
 
         app._create_token_credential()
 
+        environment_credential.assert_called_once_with()
+        managed_identity_credential.assert_called_once_with()
         interactive_browser_credential.assert_called_once_with(
             login_hint="user@example.com",
         )
         azure_cli_credential.assert_called_once_with()
-        chained_token_credential.assert_called_once_with("interactive", "cli")
+        chained_token_credential.assert_called_once_with(
+            "env",
+            "managed",
+            "interactive",
+            "cli",
+        )
 
     @patch("builtins.print")
     @patch("builtins.input", side_effect=KeyboardInterrupt)
