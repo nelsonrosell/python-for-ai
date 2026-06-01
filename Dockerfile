@@ -14,18 +14,19 @@ RUN apt-get update \
         ca-certificates \
         curl \
         gcc \
-        gnupg2 \
+        gnupg \
         g++ \
         libgssapi-krb5-2 \
         unixodbc \
         unixodbc-dev \
+    && mkdir -p /usr/share/keyrings \
     && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-        | gpg --dearmor \
+        | gpg --dearmor --batch --yes \
         -o /usr/share/keyrings/microsoft-prod.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
         > /etc/apt/sources.list.d/microsoft-prod.list \
     && apt-get update \
-    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && DEBIAN_FRONTEND=noninteractive ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
