@@ -7,7 +7,9 @@ from urllib.parse import quote_plus
 from azure.identity import (
     AzureCliCredential,
     ChainedTokenCredential,
+    EnvironmentCredential,
     InteractiveBrowserCredential,
+    ManagedIdentityCredential,
 )
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_community.utilities import SQLDatabase
@@ -97,15 +99,21 @@ class SqlAgentApp:
 
     def _create_token_credential(self) -> ChainedTokenCredential:
         """Build a ChainedTokenCredential that tries, in order:
-        1. InteractiveBrowserCredential with a login hint (if configured).
-        2. AzureCliCredential (works when the developer is already logged in via 'az login').
-        3. InteractiveBrowserCredential without a hint (fallback pop-up).
+        1. EnvironmentCredential (service principal via env vars).
+        2. ManagedIdentityCredential (Azure-hosted identity).
+        3. InteractiveBrowserCredential with a login hint (if configured).
+        4. AzureCliCredential (works when the developer is already logged in via 'az login').
+        5. InteractiveBrowserCredential without a hint (fallback pop-up).
 
         When a login hint is configured, prefer the interactive credential first
         so the app authenticates with that intended Entra user instead of any
         unrelated Azure CLI session already present on the machine.
         """
         credentials = []
+
+        # Non-interactive credentials for hosted environments (App Service, CI/CD).
+        credentials.append(EnvironmentCredential())
+        credentials.append(ManagedIdentityCredential())
 
         if self.config.sql_entra_login_hint:
             credentials.append(
