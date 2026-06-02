@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -13,9 +14,22 @@ from app.auth import (
 )
 from app.logging_utils import configure_logging
 
-CHATGPT_STYLE_PATH = Path(__file__).with_name("css").joinpath("streamlit_app.css")
+CHATGPT_STYLE_PATH = Path(__file__).with_name(
+    "css").joinpath("streamlit_app.css")
 LOG_FILE_PATH = configure_logging()
 LOGGER = logging.getLogger(__name__)
+USER_AVATAR_ENV = "APP_CHAT_USER_AVATAR"
+ASSISTANT_AVATAR_ENV = "APP_CHAT_ASSISTANT_AVATAR"
+
+
+def _chat_avatar(role: str) -> str | None:
+    if role == "user":
+        avatar = os.environ.get(USER_AVATAR_ENV, "").strip()
+        return avatar or "👤"
+    if role == "assistant":
+        avatar = os.environ.get(ASSISTANT_AVATAR_ENV, "").strip()
+        return avatar or "🤖"
+    return None
 
 
 def _render_sign_out_button() -> None:
@@ -45,7 +59,7 @@ def run_chat_turn(app: SqlAgentApp, question: str) -> dict[str, str]:
     normalized = question.lower()
 
     if normalized.startswith("export csv "):
-        sql_query = question[len("export csv ") :].strip()
+        sql_query = question[len("export csv "):].strip()
         return {
             "role": "assistant",
             "content": app.export_query_to_csv(sql_query),
@@ -79,7 +93,8 @@ def _submit_prompt(app: SqlAgentApp, prompt: str) -> None:
     except Exception as e:
         LOGGER.exception("Prompt processing failed")
         error_text = get_generic_prompt_error_message()
-        st.session_state.messages.append({"role": "assistant", "content": error_text})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": error_text})
 
 
 def _queue_prompt(prompt: str) -> None:
@@ -144,7 +159,8 @@ def _parse_markdown_table(table_lines: list[str]) -> list[dict[str, str]]:
         if not values:
             continue
         normalized_values = values + [""] * max(0, len(headers) - len(values))
-        row = {headers[idx]: normalized_values[idx] for idx in range(len(headers))}
+        row = {headers[idx]: normalized_values[idx]
+               for idx in range(len(headers))}
         rows.append(row)
     return rows
 
@@ -272,7 +288,8 @@ def _render_centered_prompt_form(
         if show_loading:
             _render_loading_status(compact=True)
 
-        st.markdown('<div class="centered-prompt-shell">', unsafe_allow_html=True)
+        st.markdown('<div class="centered-prompt-shell">',
+                    unsafe_allow_html=True)
         if show_loading:
             st.text_input(
                 "Ask me about your data or even general questions",
@@ -344,7 +361,8 @@ def _render_export_expander(app: SqlAgentApp) -> None:
             "Export Query to CSV", key="main_export_button", use_container_width=True
         ):
             result = app.export_query_to_csv(export_query.strip())
-            st.session_state.messages.append({"role": "assistant", "content": result})
+            st.session_state.messages.append(
+                {"role": "assistant", "content": result})
             export_path = _extract_export_path(result)
             if export_path:
                 st.session_state["last_export_path"] = export_path
@@ -410,7 +428,7 @@ def main() -> None:
                 st.rerun()
 
     for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
+        with st.chat_message(message["role"], avatar=_chat_avatar(message["role"])):
             _render_message_content(message["content"])
             image_path = message.get("image_path", "")
             if image_path and Path(image_path).exists():
@@ -485,7 +503,8 @@ def main() -> None:
         if has_pending_prompt and st.session_state.pending_prompt_ready:
             _render_loading_status(floating=True)
 
-        prompt = st.chat_input("Ask me about your data or even general questions")
+        prompt = st.chat_input(
+            "Ask me about your data or even general questions")
         if prompt:
             _queue_prompt(prompt)
             st.rerun()
