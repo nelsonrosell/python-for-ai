@@ -173,6 +173,18 @@
     margin-right: 0;
 }
 
+[aria-label="Chat message from assistant"] [data-testid^="stChatMessageAvatar"] {
+    width: 2.2rem;
+    height: 2.2rem;
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
+[aria-label="Chat message from assistant"] [data-testid^="stChatMessageAvatar"] * {
+    font-size: 1.35rem;
+    line-height: 1;
+}
+
 [aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] p,
 [aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] li,
 [aria-label="Chat message from user"] [data-testid="stMarkdownContainer"] span {
