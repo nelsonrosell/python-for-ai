@@ -25,10 +25,10 @@ ASSISTANT_AVATAR_ENV = "APP_CHAT_ASSISTANT_AVATAR"
 def _chat_avatar(role: str) -> str | None:
     if role == "user":
         avatar = os.environ.get(USER_AVATAR_ENV, "").strip()
-        return avatar or "👤"
+        return avatar or ":material/person:"
     if role == "assistant":
         avatar = os.environ.get(ASSISTANT_AVATAR_ENV, "").strip()
-        return avatar or "🤖"
+        return avatar or ":material/smart_toy:"
     return None
 
 
