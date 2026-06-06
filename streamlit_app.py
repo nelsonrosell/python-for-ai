@@ -292,7 +292,7 @@ def _render_prompt_behavior_bridge() -> None:
         const singleLineHeight = {PROMPT_SINGLE_LINE_HEIGHT_PX};
         const maxExpandedHeight = {PROMPT_MAX_EXPANDED_HEIGHT_PX};
 
-        function resizePrompt(textarea, containerSelector, submitSelector) {{
+        function resizePrompt(textarea, containerSelector) {{
             if (!textarea) {{
                 return;
             }}
@@ -319,18 +319,6 @@ def _render_prompt_behavior_bridge() -> None:
             if (textarea.dataset.promptBehaviorBound !== "true") {{
                 textarea.dataset.promptBehaviorBound = "true";
                 textarea.addEventListener("input", updateHeight);
-
-                if (submitSelector) {{
-                    textarea.addEventListener("keydown", (event) => {{
-                        if (event.key === "Enter" && !event.shiftKey) {{
-                            event.preventDefault();
-                            const submitButton = doc.querySelector(submitSelector);
-                            if (submitButton && !submitButton.disabled) {{
-                                submitButton.click();
-                            }}
-                        }}
-                    }});
-                }}
             }}
 
             updateHeight();
@@ -338,19 +326,8 @@ def _render_prompt_behavior_bridge() -> None:
 
         function bindPromptBehavior() {{
             resizePrompt(
-                doc.querySelector('.st-key-center_prompt_text textarea'),
-                '.st-key-center_prompt_text',
-                '.st-key-center_prompt_submit button'
-            );
-            resizePrompt(
-                doc.querySelector('.st-key-center_prompt_loading_text textarea'),
-                '.st-key-center_prompt_loading_text',
-                ''
-            );
-            resizePrompt(
                 doc.querySelector('[data-testid="stChatInput"] textarea'),
-                '[data-testid="stChatInput"]',
-                ''
+                '[data-testid="stChatInput"]'
             );
         }}
 
@@ -369,47 +346,6 @@ def _render_prompt_behavior_bridge() -> None:
         """,
         height=0,
     )
-
-
-def _render_centered_prompt_form(
-    *, show_loading: bool = False, pending_prompt: str = ""
-) -> str | None:
-    outer_left, prompt_area, outer_right = st.columns([1.3, 6.7, 1])
-    with prompt_area:
-        if show_loading:
-            _render_loading_status(compact=True)
-
-        st.markdown('<div class="centered-prompt-shell">',
-                    unsafe_allow_html=True)
-        if show_loading:
-            st.text_area(
-                "Ask me about your data or even general questions",
-                value=pending_prompt,
-                height=PROMPT_SINGLE_LINE_HEIGHT_PX,
-                key="center_prompt_loading_text",
-                label_visibility="collapsed",
-                disabled=True,
-            )
-            prompt = ""
-            submitted = False
-        else:
-            prompt = st.text_area(
-                "Ask me about your data or even general questions",
-                placeholder="Ask me about your data or even general questions",
-                height=PROMPT_SINGLE_LINE_HEIGHT_PX,
-                key="center_prompt_text",
-                label_visibility="collapsed",
-            )
-            submitted = st.button(
-                "Send",
-                key="center_prompt_submit",
-                use_container_width=True,
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if submitted and prompt.strip():
-        return prompt.strip()
-    return None
 
 
 def _render_loading_status(*, floating: bool = False, compact: bool = False) -> None:
@@ -505,9 +441,13 @@ def main() -> None:
     has_pending_prompt = bool(st.session_state.pending_prompt)
 
     if not has_messages:
-        first_prompt = _render_centered_prompt_form(
-            show_loading=has_pending_prompt and st.session_state.pending_prompt_ready,
-            pending_prompt=st.session_state.pending_prompt,
+        if has_pending_prompt and st.session_state.pending_prompt_ready:
+            _render_loading_status(floating=True)
+
+        first_prompt = st.chat_input(
+            "Ask me about your data or even general questions",
+            key="initial_chat_input",
+            disabled=has_pending_prompt,
         )
         if first_prompt:
             _queue_prompt(first_prompt)
