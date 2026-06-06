@@ -406,7 +406,7 @@ def _render_loading_status(*, floating: bool = False, compact: bool = False) -> 
         f"""
         <div class="{" ".join(class_names)}" aria-live="polite">
             <span class="floating-answer-status__spinner" aria-hidden="true"></span>
-            <span class="floating-answer-status__label">Searching for an answer...</span>
+            <span class="floating-answer-status__label">Answering...</span>
         </div>
         """,
         unsafe_allow_html=True,
