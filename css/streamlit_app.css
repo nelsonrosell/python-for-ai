@@ -105,6 +105,7 @@
     border: 1px solid var(--border);
     border-radius: 1.2rem;
     backdrop-filter: blur(18px);
+    text-align: center;
 }
 
 .centered-prompt-shell {
@@ -114,6 +115,20 @@
     padding-left: var(--content-inset);
     padding-right: var(--content-inset);
     box-sizing: border-box;
+}
+
+[data-testid="stBottom"]:has(.st-key-initial_chat_input) {
+    position: fixed;
+    top: 11.2rem;
+    bottom: auto;
+    left: 0;
+    width: 100%;
+    z-index: 98;
+    pointer-events: none;
+}
+
+[data-testid="stBottom"]:has(.st-key-initial_chat_input) .st-key-initial_chat_input {
+    pointer-events: auto;
 }
 
 .st-key-center_prompt_submit,
@@ -344,7 +359,7 @@
     max-width: var(--prompt-width);
     margin-right: auto;
     border: 1px solid var(--border) !important;
-    border-radius: 0.9rem;
+    border-radius: 999px;
     box-shadow: none !important;
     outline: none !important;
 }

@@ -292,7 +292,7 @@ def _render_prompt_behavior_bridge() -> None:
         const singleLineHeight = {PROMPT_SINGLE_LINE_HEIGHT_PX};
         const maxExpandedHeight = {PROMPT_MAX_EXPANDED_HEIGHT_PX};
 
-        function resizePrompt(textarea, containerSelector) {{
+        function resizePrompt(textarea, containerSelector, submitSelector) {{
             if (!textarea) {{
                 return;
             }}
@@ -319,15 +319,48 @@ def _render_prompt_behavior_bridge() -> None:
             if (textarea.dataset.promptBehaviorBound !== "true") {{
                 textarea.dataset.promptBehaviorBound = "true";
                 textarea.addEventListener("input", updateHeight);
+
+                if (submitSelector) {{
+                    textarea.addEventListener("keydown", (event) => {{
+                        if (
+                            event.key === "Enter"
+                            && !event.shiftKey
+                            && !event.ctrlKey
+                            && !event.metaKey
+                        ) {{
+                            event.preventDefault();
+                            textarea.dispatchEvent(
+                                new KeyboardEvent("keydown", {{
+                                    key: "Enter",
+                                    code: "Enter",
+                                    ctrlKey: true,
+                                    bubbles: true,
+                                    cancelable: true,
+                                }})
+                            );
+                        }}
+                    }});
+                }}
+                && initialPromptContainer
+                && initialPromptAnchor.firstElementChild !== initialPromptContainer
+            ) {{
+                initialPromptAnchor.appendChild(initialPromptContainer);
             }}
 
-            updateHeight();
-        }}
-
-        function bindPromptBehavior() {{
+            resizePrompt(
+                doc.querySelector('.st-key-center_prompt_text textarea'),
+                '.st-key-center_prompt_text',
+                '.st-key-center_prompt_submit button'
+            );
+            resizePrompt(
+                doc.querySelector('.st-key-center_prompt_loading_text textarea'),
+                '.st-key-center_prompt_loading_text',
+                ''
+            );
             resizePrompt(
                 doc.querySelector('[data-testid="stChatInput"] textarea'),
-                '[data-testid="stChatInput"]'
+                '[data-testid="stChatInput"]',
+                ''
             );
         }}
 
@@ -346,6 +379,45 @@ def _render_prompt_behavior_bridge() -> None:
         """,
         height=0,
     )
+
+
+def _render_top_prompt(*, show_loading: bool = False, pending_prompt: str = "") -> str | None:
+    _, prompt_area, _ = st.columns([1.3, 6.7, 1])
+    with prompt_area:
+        if show_loading:
+            _render_loading_status(compact=True)
+
+        st.markdown('<div class="centered-prompt-shell">',
+                    unsafe_allow_html=True)
+        if show_loading:
+            st.text_area(
+                "Ask me about your data or even general questions",
+                value=pending_prompt,
+                height=PROMPT_SINGLE_LINE_HEIGHT_PX,
+                key="center_prompt_loading_text",
+                label_visibility="collapsed",
+                disabled=True,
+            )
+            prompt = ""
+            submitted = False
+        else:
+            prompt = st.text_area(
+                "Ask me about your data or even general questions",
+                placeholder="Ask me about your data or even general questions",
+                height=PROMPT_SINGLE_LINE_HEIGHT_PX,
+                key="center_prompt_text",
+                label_visibility="collapsed",
+            )
+            submitted = st.button(
+                "Send",
+                key="center_prompt_submit",
+                use_container_width=True,
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if submitted and prompt.strip():
+        return prompt.strip()
+    return None
 
 
 def _render_loading_status(*, floating: bool = False, compact: bool = False) -> None:
