@@ -185,15 +185,17 @@
 
 .stChatMessage,
 .stChatMessage[data-testid="stChatMessage"] {
+    width: 100%;
+    max-width: var(--content-width);
     margin-bottom: 1rem;
-    margin-left: calc(var(--prompt-left-offset) + var(--history-right-shift));
+    margin-left: auto;
+    margin-right: auto;
     padding-top: 1rem;
     padding-right: 1.15rem;
     padding-bottom: 1rem;
     padding-left: 2.6rem !important;
     border: 1px solid var(--border);
     border-radius: 1.15rem;
-    max-width: calc(var(--content-width) - var(--prompt-left-offset) - var(--history-right-shift));
 }
 
 .stChatMessage:last-of-type {
@@ -202,15 +204,16 @@
 
 [aria-label="Chat message from user"] {
     border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-    margin-left: 0;
+    margin-left: auto;
     margin-right: auto;
-    max-width: var(--prompt-width);
+    max-width: var(--content-width);
 }
 
 [aria-label="Chat message from assistant"] {
     border-color: var(--border);
-    margin-left: 0;
-    margin-right: 0;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: var(--content-width);
 }
 
 [aria-label="Chat message from assistant"] [data-testid^="stChatMessageAvatar"] {
