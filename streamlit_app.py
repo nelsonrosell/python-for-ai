@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from app import SqlAgentApp
 from app.auth import (
@@ -20,6 +21,8 @@ LOG_FILE_PATH = configure_logging()
 LOGGER = logging.getLogger(__name__)
 USER_AVATAR_ENV = "APP_CHAT_USER_AVATAR"
 ASSISTANT_AVATAR_ENV = "APP_CHAT_ASSISTANT_AVATAR"
+PROMPT_SINGLE_LINE_HEIGHT_PX = 52
+PROMPT_MAX_EXPANDED_HEIGHT_PX = 180
 
 
 def _chat_avatar(role: str) -> str | None:
@@ -280,6 +283,94 @@ def _render_starter_prompts(app: SqlAgentApp) -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+def _render_prompt_behavior_bridge() -> None:
+    components.html(
+        f"""
+        <script>
+        const rootWindow = window.parent;
+        const doc = rootWindow.document;
+        const singleLineHeight = {PROMPT_SINGLE_LINE_HEIGHT_PX};
+        const maxExpandedHeight = {PROMPT_MAX_EXPANDED_HEIGHT_PX};
+
+        function resizePrompt(textarea, containerSelector, submitSelector) {{
+            if (!textarea) {{
+                return;
+            }}
+
+            const updateHeight = () => {{
+                const hasExplicitNewline = (textarea.value || "").includes("\\n");
+                const container = containerSelector
+                    ? textarea.closest(containerSelector)
+                    : null;
+
+                if (container) {{
+                    container.dataset.multiline = hasExplicitNewline ? "true" : "false";
+                }}
+
+                textarea.style.height = `${{singleLineHeight}}px`;
+                textarea.style.overflowY = "auto";
+
+                if (hasExplicitNewline) {{
+                    const nextHeight = Math.min(textarea.scrollHeight, maxExpandedHeight);
+                    textarea.style.height = `${{Math.max(nextHeight, singleLineHeight)}}px`;
+                }}
+            }};
+
+            if (textarea.dataset.promptBehaviorBound !== "true") {{
+                textarea.dataset.promptBehaviorBound = "true";
+                textarea.addEventListener("input", updateHeight);
+
+                if (submitSelector) {{
+                    textarea.addEventListener("keydown", (event) => {{
+                        if (event.key === "Enter" && !event.shiftKey) {{
+                            event.preventDefault();
+                            const submitButton = doc.querySelector(submitSelector);
+                            if (submitButton && !submitButton.disabled) {{
+                                submitButton.click();
+                            }}
+                        }}
+                    }});
+                }}
+            }}
+
+            updateHeight();
+        }}
+
+        function bindPromptBehavior() {{
+            resizePrompt(
+                doc.querySelector('.st-key-center_prompt_text textarea'),
+                '.st-key-center_prompt_text',
+                '.st-key-center_prompt_submit button'
+            );
+            resizePrompt(
+                doc.querySelector('.st-key-center_prompt_loading_text textarea'),
+                '.st-key-center_prompt_loading_text',
+                ''
+            );
+            resizePrompt(
+                doc.querySelector('[data-testid="stChatInput"] textarea'),
+                '[data-testid="stChatInput"]',
+                ''
+            );
+        }}
+
+        if (!rootWindow.__promptBehaviorObserver) {{
+            rootWindow.__promptBehaviorObserver = new rootWindow.MutationObserver(() => {{
+                bindPromptBehavior();
+            }});
+            rootWindow.__promptBehaviorObserver.observe(doc.body, {{
+                childList: true,
+                subtree: true,
+            }});
+        }}
+
+        bindPromptBehavior();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _render_centered_prompt_form(
     *, show_loading: bool = False, pending_prompt: str = ""
 ) -> str | None:
@@ -291,9 +382,10 @@ def _render_centered_prompt_form(
         st.markdown('<div class="centered-prompt-shell">',
                     unsafe_allow_html=True)
         if show_loading:
-            st.text_input(
+            st.text_area(
                 "Ask me about your data or even general questions",
                 value=pending_prompt,
+                height=PROMPT_SINGLE_LINE_HEIGHT_PX,
                 key="center_prompt_loading_text",
                 label_visibility="collapsed",
                 disabled=True,
@@ -301,17 +393,18 @@ def _render_centered_prompt_form(
             prompt = ""
             submitted = False
         else:
-            with st.form("center_prompt_form", clear_on_submit=True, border=False):
-                prompt = st.text_input(
-                    "Ask me about your data or even general questions",
-                    placeholder="Ask me about your data or even general questions",
-                    key="center_prompt_text",
-                    label_visibility="collapsed",
-                )
-                submitted = st.form_submit_button(
-                    "Send",
-                    use_container_width=True,
-                )
+            prompt = st.text_area(
+                "Ask me about your data or even general questions",
+                placeholder="Ask me about your data or even general questions",
+                height=PROMPT_SINGLE_LINE_HEIGHT_PX,
+                key="center_prompt_text",
+                label_visibility="collapsed",
+            )
+            submitted = st.button(
+                "Send",
+                key="center_prompt_submit",
+                use_container_width=True,
+            )
         st.markdown("</div>", unsafe_allow_html=True)
 
     if submitted and prompt.strip():
@@ -515,6 +608,8 @@ def main() -> None:
             else:
                 st.session_state.pending_prompt_ready = True
                 st.rerun()
+
+    _render_prompt_behavior_bridge()
 
 
 if __name__ == "__main__":

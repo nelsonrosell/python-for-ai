@@ -56,6 +56,30 @@
     box-shadow: none;
 }
 
+.st-key-center_prompt_text [data-baseweb="textarea"],
+.st-key-center_prompt_loading_text [data-baseweb="textarea"] {
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    box-shadow: none !important;
+    background: var(--surface);
+}
+
+.st-key-center_prompt_text [data-baseweb="textarea"]:focus-within,
+.st-key-center_prompt_loading_text [data-baseweb="textarea"]:focus-within {
+    border-color: var(--border);
+    box-shadow: none !important;
+}
+
+.st-key-center_prompt_text textarea,
+.st-key-center_prompt_loading_text textarea {
+    min-height: 52px !important;
+    max-height: 180px !important;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    box-shadow: none !important;
+    resize: none !important;
+}
+
 .stButton > button {
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
@@ -92,8 +116,9 @@
     box-sizing: border-box;
 }
 
-[class*="st-key-FormSubmitter-center_prompt_form"],
-[class*="st-key-FormSubmitter-center_prompt_form"] [data-testid="stFormSubmitButton"] {
+.st-key-center_prompt_submit,
+.st-key-center_prompt_submit .stButton,
+.st-key-center_prompt_submit button {
     display: none;
 }
 
@@ -351,11 +376,16 @@
 }
 
 [data-testid="stChatInput"] textarea {
+    min-height: 52px !important;
+    max-height: 180px !important;
     box-shadow: none !important;
     outline: none !important;
     border-color: transparent !important;
     text-align: left;
     padding-left: 0.75rem;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    resize: none !important;
 }
 
 [data-testid="stChatInput"] [data-baseweb="textarea"]:has(textarea[aria-invalid="true"]) {
