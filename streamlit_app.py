@@ -292,10 +292,15 @@ def _render_prompt_behavior_bridge() -> None:
         const singleLineHeight = {PROMPT_SINGLE_LINE_HEIGHT_PX};
         const maxExpandedHeight = {PROMPT_MAX_EXPANDED_HEIGHT_PX};
 
-        function resizePrompt(textarea, containerSelector, submitSelector) {{
-            if (!textarea) {{
-                return;
-            }}
+        function updateSidebarOffset() {{
+            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+            const offset = sidebar ? sidebar.getBoundingClientRect().width : 0;
+            doc.documentElement.style.setProperty('--sidebar-offset', offset + 'px');
+        }}
+
+        function resizePrompt(textarea, containerSelector) {{
+            if (!textarea || textarea.dataset.promptBehaviorBound === "true") return;
+            textarea.dataset.promptBehaviorBound = "true";
 
             const updateHeight = () => {{
                 const hasExplicitNewline = (textarea.value || "").includes("\\n");
@@ -316,65 +321,35 @@ def _render_prompt_behavior_bridge() -> None:
                 }}
             }};
 
-            if (textarea.dataset.promptBehaviorBound !== "true") {{
-                textarea.dataset.promptBehaviorBound = "true";
-                textarea.addEventListener("input", updateHeight);
+            textarea.addEventListener("input", updateHeight);
+        }}
 
-                if (submitSelector) {{
-                    textarea.addEventListener("keydown", (event) => {{
-                        if (
-                            event.key === "Enter"
-                            && !event.shiftKey
-                            && !event.ctrlKey
-                            && !event.metaKey
-                        ) {{
-                            event.preventDefault();
-                            textarea.dispatchEvent(
-                                new KeyboardEvent("keydown", {{
-                                    key: "Enter",
-                                    code: "Enter",
-                                    ctrlKey: true,
-                                    bubbles: true,
-                                    cancelable: true,
-                                }})
-                            );
-                        }}
-                    }});
-                }}
-                && initialPromptContainer
-                && initialPromptAnchor.firstElementChild !== initialPromptContainer
-            ) {{
-                initialPromptAnchor.appendChild(initialPromptContainer);
-            }}
-
-            resizePrompt(
-                doc.querySelector('.st-key-center_prompt_text textarea'),
-                '.st-key-center_prompt_text',
-                '.st-key-center_prompt_submit button'
-            );
-            resizePrompt(
-                doc.querySelector('.st-key-center_prompt_loading_text textarea'),
-                '.st-key-center_prompt_loading_text',
-                ''
-            );
+        function bindAll() {{
+            updateSidebarOffset();
             resizePrompt(
                 doc.querySelector('[data-testid="stChatInput"] textarea'),
-                '[data-testid="stChatInput"]',
-                ''
+                '[data-testid="stChatInput"]'
             );
         }}
 
+        // Track sidebar resize so fixed prompt shifts with it
+        if (!rootWindow.__sidebarResizeObserver) {{
+            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+            if (sidebar) {{
+                rootWindow.__sidebarResizeObserver = new rootWindow.ResizeObserver(updateSidebarOffset);
+                rootWindow.__sidebarResizeObserver.observe(sidebar);
+            }}
+        }}
+
         if (!rootWindow.__promptBehaviorObserver) {{
-            rootWindow.__promptBehaviorObserver = new rootWindow.MutationObserver(() => {{
-                bindPromptBehavior();
-            }});
+            rootWindow.__promptBehaviorObserver = new rootWindow.MutationObserver(bindAll);
             rootWindow.__promptBehaviorObserver.observe(doc.body, {{
                 childList: true,
                 subtree: true,
             }});
         }}
 
-        bindPromptBehavior();
+        bindAll();
         </script>
         """,
         height=0,

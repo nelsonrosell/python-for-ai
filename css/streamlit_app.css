@@ -121,8 +121,8 @@
     position: fixed;
     top: 11.2rem;
     bottom: auto;
-    left: 0;
-    width: 100%;
+    left: var(--sidebar-offset, 0px);
+    width: calc(100% - var(--sidebar-offset, 0px));
     z-index: 98;
     pointer-events: none;
 }
@@ -360,6 +360,7 @@
 [data-testid="stChatInput"] > div {
     width: min(100%, var(--prompt-width));
     max-width: var(--prompt-width);
+    margin-left: auto;
     margin-right: auto;
     border: 1px solid var(--border) !important;
     border-radius: 999px;
