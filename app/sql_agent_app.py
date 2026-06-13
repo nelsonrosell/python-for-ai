@@ -604,7 +604,7 @@ class SqlAgentApp:
         )
 
     def generate_earthquake_pie_chart(self) -> str:
-        """Generate a pie chart of earthquake distribution by country."""
+        """Generate a pie chart/graph of earthquake distribution by country."""
         data = self.get_earthquake_counts_by_county()
         if not data:
             return "No earthquake data available."
