@@ -59,7 +59,7 @@
 .st-key-center_prompt_text [data-baseweb="textarea"],
 .st-key-center_prompt_loading_text [data-baseweb="textarea"] {
     border: 1px solid var(--border);
-    border-radius: 0.9rem;
+    border-radius: 999px;
     box-shadow: none !important;
     background: var(--surface);
 }
