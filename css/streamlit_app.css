@@ -172,6 +172,8 @@
     width: 100%;
     display: flex;
     justify-content: center;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
 }
 
 [data-testid="stBottom"]:has(.st-key-initial_chat_input) .st-key-initial_chat_input {
