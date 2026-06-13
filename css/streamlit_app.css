@@ -72,10 +72,10 @@
 
 .st-key-center_prompt_text textarea,
 .st-key-center_prompt_loading_text textarea {
-    min-height: 52px !important;
-    max-height: 180px !important;
-    padding-top: 0.75rem;
-    padding-bottom: 0.75rem;
+    min-height: 40px !important;
+    max-height: 160px !important;
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
     box-shadow: none !important;
     resize: none !important;
 }
