@@ -155,36 +155,20 @@
     box-sizing: border-box;
 }
 
-body.st-initial-chat-mode [data-testid="stBottom"] {
+.st-key-initial_chat_input {
     position: fixed;
     top: 11.2rem;
-    bottom: auto;
-    left: var(--sidebar-offset, 0px);
-    width: calc(100% - var(--sidebar-offset, 0px));
-    display: flex;
-    justify-content: center;
-    z-index: 98;
-    pointer-events: none;
-}
-
-body.st-initial-chat-mode [data-testid="stBottom"] [data-testid="stBottomBlockContainer"] {
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-}
-
-body.st-initial-chat-mode [data-testid="stBottom"] .st-key-initial_chat_input {
-    width: min(var(--prompt-width), calc(100% - (2 * var(--content-inset))));
+    left: calc(50% + (var(--sidebar-offset, 0px) / 2));
+    width: min(var(--prompt-width), calc(100vw - var(--sidebar-offset, 0px) - (2 * var(--content-inset))));
     max-width: var(--prompt-width);
-    pointer-events: auto;
+    transform: translateX(-50%);
+    z-index: 98;
 }
 
-body.st-initial-chat-mode [data-testid="stBottom"] [data-testid="stChatInput"] {
-    width: min(var(--prompt-width), calc(100vw - var(--sidebar-offset, 0px) - (2 * var(--content-inset)))) !important;
-    max-width: var(--prompt-width) !important;
-    margin: 0 auto !important;
+.st-key-initial_chat_input [data-testid="stChatInput"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
 }
 
 .st-key-center_prompt_submit,
