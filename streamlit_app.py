@@ -21,7 +21,7 @@ LOG_FILE_PATH = configure_logging()
 LOGGER = logging.getLogger(__name__)
 USER_AVATAR_ENV = "APP_CHAT_USER_AVATAR"
 ASSISTANT_AVATAR_ENV = "APP_CHAT_ASSISTANT_AVATAR"
-PROMPT_SINGLE_LINE_HEIGHT_PX = 40
+PROMPT_SINGLE_LINE_HEIGHT_PX = 38
 PROMPT_MAX_EXPANDED_HEIGHT_PX = 180
 
 
@@ -302,6 +302,20 @@ def _render_prompt_behavior_bridge() -> None:
             if (!textarea || textarea.dataset.promptBehaviorBound === "true") return;
             textarea.dataset.promptBehaviorBound = "true";
 
+            const baseInput = textarea.closest('[data-baseweb="base-input"]');
+            const textAreaWrapper = textarea.closest('[data-baseweb="textarea"]');
+
+            textarea.style.minHeight = `${{singleLineHeight}}px`;
+            textarea.style.borderRadius = '999px';
+
+            if (baseInput) {{
+                baseInput.style.borderRadius = '999px';
+            }}
+
+            if (textAreaWrapper) {{
+                textAreaWrapper.style.borderRadius = '999px';
+            }}
+
             const updateHeight = () => {{
                 const hasExplicitNewline = (textarea.value || "").includes("\\n");
                 const container = containerSelector
@@ -322,6 +336,7 @@ def _render_prompt_behavior_bridge() -> None:
             }};
 
             textarea.addEventListener("input", updateHeight);
+            updateHeight();
         }}
 
         function bindAll() {{
