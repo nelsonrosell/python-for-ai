@@ -85,6 +85,12 @@
     border-radius: 999px;
 }
 
+[data-testid="stChatInput"] > div {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    align-items: center !important;
+}
+
 [data-testid="stChatInput"] [data-baseweb="textarea"],
 [data-testid="stChatInput"] [data-baseweb="base-input"] {
     border: 1px solid var(--border);
