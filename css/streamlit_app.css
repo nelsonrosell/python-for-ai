@@ -150,13 +150,12 @@
 .centered-prompt-shell {
     max-width: var(--content-width);
     margin: 0 auto 1.25rem auto;
-    transform: translateX(4px);
     padding-left: var(--content-inset);
     padding-right: var(--content-inset);
     box-sizing: border-box;
 }
 
-[data-testid="stBottom"]:has(.st-key-initial_chat_input) {
+body.st-initial-chat-mode [data-testid="stBottom"] {
     position: fixed;
     top: 11.2rem;
     bottom: auto;
@@ -168,7 +167,7 @@
     pointer-events: none;
 }
 
-[data-testid="stBottom"]:has(.st-key-initial_chat_input) [data-testid="stBottomBlockContainer"] {
+body.st-initial-chat-mode [data-testid="stBottom"] [data-testid="stBottomBlockContainer"] {
     width: 100%;
     display: flex;
     justify-content: center;
@@ -176,13 +175,13 @@
     padding-right: 0 !important;
 }
 
-[data-testid="stBottom"]:has(.st-key-initial_chat_input) .st-key-initial_chat_input {
+body.st-initial-chat-mode [data-testid="stBottom"] .st-key-initial_chat_input {
     width: min(var(--prompt-width), calc(100% - (2 * var(--content-inset))));
     max-width: var(--prompt-width);
     pointer-events: auto;
 }
 
-[data-testid="stBottom"]:has(.st-key-initial_chat_input) [data-testid="stChatInput"] {
+body.st-initial-chat-mode [data-testid="stBottom"] [data-testid="stChatInput"] {
     width: min(var(--prompt-width), calc(100vw - var(--sidebar-offset, 0px) - (2 * var(--content-inset)))) !important;
     max-width: var(--prompt-width) !important;
     margin: 0 auto !important;
@@ -195,7 +194,7 @@
 }
 
 .chat-shell h1 {
-    margin: 0 0 0 9px;
+    margin: 0;
     color: var(--text);
     font-size: 1.9rem;
     font-weight: 650;
@@ -203,7 +202,7 @@
 }
 
 .chat-shell p {
-    margin: 0.45rem 0 0 9px;
+    margin: 0.45rem 0 0 0;
     color: var(--text-muted);
     line-height: 1.55;
 }

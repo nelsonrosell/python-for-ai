@@ -298,6 +298,11 @@ def _render_prompt_behavior_bridge() -> None:
             doc.documentElement.style.setProperty('--sidebar-offset', offset + 'px');
         }}
 
+        function updateInitialChatMode() {{
+            const hasInitialPrompt = Boolean(doc.querySelector('.st-key-initial_chat_input'));
+            doc.body.classList.toggle('st-initial-chat-mode', hasInitialPrompt);
+        }}
+
         function resizePrompt(textarea, containerSelector) {{
             if (!textarea || textarea.dataset.promptBehaviorBound === "true") return;
             textarea.dataset.promptBehaviorBound = "true";
@@ -341,6 +346,7 @@ def _render_prompt_behavior_bridge() -> None:
 
         function bindAll() {{
             updateSidebarOffset();
+            updateInitialChatMode();
             resizePrompt(
                 doc.querySelector('[data-testid="stChatInput"] textarea'),
                 '[data-testid="stChatInput"]'
